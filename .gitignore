@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+.kotlin/
+.agents/
+.codex/
+build/
+local.properties
+*.iml
+
+app/build/
