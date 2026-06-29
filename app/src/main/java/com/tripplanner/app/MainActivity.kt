@@ -75,10 +75,14 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import com.tripplanner.app.data.auth.AuthRepository
+import com.tripplanner.app.data.auth.AuthProvider
+import com.tripplanner.app.data.auth.AuthSession
 import com.tripplanner.app.data.google.GooglePlaceDetails
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
@@ -115,21 +119,35 @@ private enum class AppSkin(val label: String) {
     Dark("Dark")
 }
 
+private enum class AuthMode {
+    LocalLogin,
+    CreateAccount
+}
+
 @Composable
 private fun TripPlannerApp() {
     var screen by rememberSaveable { mutableStateOf(Screen.MainMenu) }
     var appSkin by rememberSaveable { mutableStateOf(AppSkin.System) }
     var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val authRepository = remember(context) { AuthRepository(context.applicationContext) }
+    var authSession by remember { mutableStateOf(authRepository.currentSession()) }
 
     fun returnToMainPage() {
         editingTripId = null
         screen = Screen.MainMenu
     }
 
+    fun signOut() {
+        authRepository.signOut()
+        authSession = null
+        returnToMainPage()
+    }
+
     BackHandler {
-        if (screen == Screen.MainMenu) {
+        if (authSession == null || screen == Screen.MainMenu) {
             showExitConfirmation = true
         } else {
             returnToMainPage()
@@ -141,41 +159,74 @@ private fun TripPlannerApp() {
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            when (screen) {
-                Screen.MainMenu -> MainMenuScreen(
+            val session = authSession
+            if (session == null) {
+                AuthScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
-                    onManageTrips = { screen = Screen.TripManagement },
-                    onUseExistingTrip = { screen = Screen.UseExistingTrip }
-                )
-
-                Screen.TripManagement -> TripManagementScreen(
-                    appSkin = appSkin,
-                    onAppSkinChange = { appSkin = it },
-                    onBack = { screen = Screen.MainMenu },
-                    onNewTrip = {
-                        editingTripId = null
-                        screen = Screen.PlanNewTrip
+                    onGoogleSignIn = {
+                        "Google sign-in needs OAuth client configuration"
                     },
-                    onEditTrip = { tripId ->
-                        editingTripId = tripId
-                        screen = Screen.PlanNewTrip
+                    onLocalSignIn = { accountName, password ->
+                        authRepository.signInLocal(
+                            accountName = accountName,
+                            password = password
+                        ).also { result ->
+                            result.session?.let { authSession = it }
+                        }.errorMessage
+                    },
+                    onCreateAccount = { accountName, password ->
+                        authRepository.createLocalAccount(
+                            accountName = accountName,
+                            password = password
+                        ).also { result ->
+                            result.session?.let { authSession = it }
+                        }.errorMessage
                     }
                 )
+            } else {
+                when (screen) {
+                    Screen.MainMenu -> MainMenuScreen(
+                        authSession = session,
+                        appSkin = appSkin,
+                        onAppSkinChange = { appSkin = it },
+                        onSignOut = ::signOut,
+                        onManageTrips = { screen = Screen.TripManagement },
+                        onUseExistingTrip = { screen = Screen.UseExistingTrip }
+                    )
 
-                Screen.UseExistingTrip -> UseExistingTripScreen(
-                    appSkin = appSkin,
-                    onAppSkinChange = { appSkin = it },
-                    onBack = { screen = Screen.MainMenu }
-                )
+                    Screen.TripManagement -> TripManagementScreen(
+                        authSession = session,
+                        appSkin = appSkin,
+                        onAppSkinChange = { appSkin = it },
+                        onSignOut = ::signOut,
+                        onBack = { screen = Screen.MainMenu },
+                        onNewTrip = {
+                            editingTripId = null
+                            screen = Screen.PlanNewTrip
+                        },
+                        onEditTrip = { tripId ->
+                            editingTripId = tripId
+                            screen = Screen.PlanNewTrip
+                        }
+                    )
 
-                Screen.PlanNewTrip -> PlanNewTripScreen(
-                    appSkin = appSkin,
-                    onAppSkinChange = { appSkin = it },
-                    editingTripId = editingTripId,
-                    onTripSaved = { tripId -> editingTripId = tripId },
-                    onBack = { returnToMainPage() }
-                )
+                    Screen.UseExistingTrip -> UseExistingTripScreen(
+                        authSession = session,
+                        appSkin = appSkin,
+                        onAppSkinChange = { appSkin = it },
+                        onSignOut = ::signOut,
+                        onBack = { screen = Screen.MainMenu }
+                    )
+
+                    Screen.PlanNewTrip -> PlanNewTripScreen(
+                        appSkin = appSkin,
+                        onAppSkinChange = { appSkin = it },
+                        editingTripId = editingTripId,
+                        onTripSaved = { tripId -> editingTripId = tripId },
+                        onBack = { returnToMainPage() }
+                    )
+                }
             }
             if (showExitConfirmation) {
                 AlertDialog(
@@ -205,8 +256,10 @@ private fun TripPlannerApp() {
 
 @Composable
 private fun MainMenuScreen(
+    authSession: AuthSession,
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onSignOut: () -> Unit,
     onManageTrips: () -> Unit,
     onUseExistingTrip: () -> Unit
 ) {
@@ -219,7 +272,10 @@ private fun MainMenuScreen(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            AppHeaderBar()
+            AppHeaderBar(
+                displayName = authSession.displayName,
+                onSignOut = onSignOut
+            )
             TripHeroPanel(
                 title = "Trip Planner",
                 subtitle = "Build a clear itinerary, bookings list, and map plan",
@@ -251,11 +307,152 @@ private fun MainMenuScreen(
     }
 }
 
+@Composable
+private fun AuthScreen(
+    appSkin: AppSkin,
+    onAppSkinChange: (AppSkin) -> Unit,
+    onGoogleSignIn: () -> String?,
+    onLocalSignIn: (String, String) -> String?,
+    onCreateAccount: (String, String) -> String?
+) {
+    var authMode by rememberSaveable { mutableStateOf(AuthMode.LocalLogin) }
+    var accountName by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var authStatus by rememberSaveable { mutableStateOf<String?>(null) }
+
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            AppHeaderBar()
+            TripHeroPanel(
+                title = "Trip Planner",
+                subtitle = "Choose an account before opening your trips",
+                status = "Account"
+            )
+            SkinSelector(
+                modifier = Modifier.fillMaxWidth(),
+                selectedSkin = appSkin,
+                onSkinSelected = onAppSkinChange
+            )
+            HomeActionCard(
+                title = "Log in with Google account",
+                subtitle = "OAuth setup required before live Google sign-in",
+                accent = Color(0xFF4F7CAC),
+                onClick = {
+                    authStatus = onGoogleSignIn() ?: "Google account signed in"
+                }
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = authMode == AuthMode.LocalLogin,
+                    onClick = {
+                        authMode = AuthMode.LocalLogin
+                        authStatus = null
+                    },
+                    label = { Text("Local account") },
+                    shape = RoundedCornerShape(8.dp)
+                )
+                FilterChip(
+                    selected = authMode == AuthMode.CreateAccount,
+                    onClick = {
+                        authMode = AuthMode.CreateAccount
+                        authStatus = null
+                    },
+                    label = { Text("Create account") },
+                    shape = RoundedCornerShape(8.dp)
+                )
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = if (authMode == AuthMode.LocalLogin) {
+                            "Local account"
+                        } else {
+                            "Create account"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = accountName,
+                        onValueChange = { accountName = it },
+                        label = { Text("Account name") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            keyboardType = KeyboardType.Text
+                        )
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            keyboardType = KeyboardType.Password
+                        )
+                    )
+                    Button(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        onClick = {
+                            authStatus = if (authMode == AuthMode.LocalLogin) {
+                                onLocalSignIn(accountName, password)
+                            } else {
+                                onCreateAccount(accountName, password)
+                            } ?: if (authMode == AuthMode.LocalLogin) {
+                                "Signed in"
+                            } else {
+                                "Account created"
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (authMode == AuthMode.LocalLogin) "Log in" else "Create account")
+                    }
+                }
+            }
+            authStatus?.let { status ->
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TripManagementScreen(
+    authSession: AuthSession,
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onSignOut: () -> Unit,
     onBack: () -> Unit,
     onNewTrip: () -> Unit,
     onEditTrip: (Long) -> Unit
@@ -287,7 +484,10 @@ private fun TripManagementScreen(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            AppHeaderBar()
+            AppHeaderBar(
+                displayName = authSession.displayName,
+                onSignOut = onSignOut
+            )
             SkinSelector(
                 modifier = Modifier.fillMaxWidth(),
                 selectedSkin = appSkin,
@@ -323,8 +523,10 @@ private fun TripManagementScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UseExistingTripScreen(
+    authSession: AuthSession,
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onSignOut: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -384,7 +586,10 @@ private fun UseExistingTripScreen(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            AppHeaderBar()
+            AppHeaderBar(
+                displayName = authSession.displayName,
+                onSignOut = onSignOut
+            )
             SkinSelector(
                 modifier = Modifier.fillMaxWidth(),
                 selectedSkin = appSkin,
@@ -702,7 +907,9 @@ private fun SecondaryMenuButton(label: String) {
 
 @Composable
 private fun AppHeaderBar(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    displayName: String = "Guest",
+    onSignOut: (() -> Unit)? = null
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -763,11 +970,16 @@ private fun AppHeaderBar(
                 )
             }
             Text(
-                text = "Guest",
+                text = displayName,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+        onSignOut?.let { signOut ->
+            TextButton(onClick = signOut) {
+                Text("Sign out")
+            }
         }
     }
 }
@@ -2383,8 +2595,14 @@ private fun TripPlannerTheme(
 private fun MainMenuPreview() {
     TripPlannerTheme {
         MainMenuScreen(
+            authSession = AuthSession(
+                accountId = "preview",
+                displayName = "Preview",
+                provider = AuthProvider.LOCAL
+            ),
             appSkin = AppSkin.System,
             onAppSkinChange = {},
+            onSignOut = {},
             onManageTrips = {},
             onUseExistingTrip = {}
         )
