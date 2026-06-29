@@ -343,6 +343,16 @@ private fun MainMenuScreen(
                         }
                     }
                 },
+                onClearMockedData = {
+                    coroutineScope.launch {
+                        databaseStatus = "Clearing mocked data"
+                        databaseStatus = runCatching {
+                            backupRepository.clearMockedData().message
+                        }.getOrElse { error ->
+                            error.message ?: "Mocked data could not be cleared"
+                        }
+                    }
+                },
                 onExportWholeDb = {
                     coroutineScope.launch {
                         databaseStatus = "Exporting whole database"
@@ -512,9 +522,35 @@ private fun DatabaseToolsPanel(
     status: String?,
     exportDirectory: String,
     onPopulateMockDb: () -> Unit,
+    onClearMockedData: () -> Unit,
     onExportWholeDb: () -> Unit,
     onImportWholeDb: () -> Unit
 ) {
+    var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
+
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text("Clear mocked data?") },
+            text = { Text("This removes local trips, pools, map presets, and cached place details. Local accounts and exported files stay untouched.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirmation = false
+                        onClearMockedData()
+                    }
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -538,6 +574,18 @@ private fun DatabaseToolsPanel(
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Populate mock DB")
+            }
+            OutlinedButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                onClick = { showClearConfirmation = true },
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Clear mocked data")
             }
             OutlinedButton(
                 modifier = Modifier

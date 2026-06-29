@@ -27,13 +27,21 @@ class TripBackupRepository(
     context: Context,
     private val database: TripPlannerDatabase
 ) {
+    private val appContext = context.applicationContext
+    private val mockSeedPreferences = appContext.getSharedPreferences(
+        MOCK_SEED_PREFERENCES_NAME,
+        Context.MODE_PRIVATE
+    )
     private val tripRepository = TripRepository(database)
     private val exportDirectory: File = File(
-        context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir,
+        appContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: appContext.filesDir,
         EXPORT_DIRECTORY_NAME
     ).apply { mkdirs() }
 
     suspend fun populateMockDatabaseIfEmpty(): BackupOperationResult {
+        if (mockSeedPreferences.getBoolean(MOCK_SEED_CLEARED_KEY, false)) {
+            return BackupOperationResult("Mock DB seed skipped: mocked data was cleared")
+        }
         val tripCount = database.tripDao().countTrips()
         if (tripCount > 0) {
             return BackupOperationResult("Mock DB seed skipped: $tripCount trips already exist")
@@ -42,6 +50,9 @@ class TripBackupRepository(
     }
 
     suspend fun populateMockDatabase(): BackupOperationResult {
+        mockSeedPreferences.edit()
+            .putBoolean(MOCK_SEED_CLEARED_KEY, false)
+            .apply()
         val firstTripId = seedTokyoTrip()
         val sharedFamilyMember = database.poolItemDao()
             .findGeneralPoolItem(MOCK_FAMILY_MEMBER_NAME, TripObjectType.FAMILY_MEMBER)
@@ -59,6 +70,20 @@ class TripBackupRepository(
 
         return BackupOperationResult(
             message = "Mock DB populated: trips #$firstTripId and #${londonTrip.tripId}"
+        )
+    }
+
+    suspend fun clearMockedData(): BackupOperationResult {
+        database.withTransaction {
+            val db = database.openHelper.writableDatabase
+            clearAppDataTables(db)
+            recreateGeneralPool(db)
+        }
+        mockSeedPreferences.edit()
+            .putBoolean(MOCK_SEED_CLEARED_KEY, true)
+            .apply()
+        return BackupOperationResult(
+            message = "Mocked data cleared. The General pool is ready for new items."
         )
     }
 
@@ -328,9 +353,7 @@ class TripBackupRepository(
         db: SupportSQLiteDatabase,
         tablesJson: JSONObject
     ) {
-        WHOLE_DATABASE_DELETE_ORDER.forEach { table ->
-            db.execSQL("DELETE FROM `$table`")
-        }
+        clearAppDataTables(db)
         WHOLE_DATABASE_INSERT_ORDER.forEach { table ->
             val rows = tablesJson.optJSONArray(table) ?: JSONArray()
             for (index in 0 until rows.length()) {
@@ -341,6 +364,25 @@ class TripBackupRepository(
                 )
             }
         }
+    }
+
+    private fun clearAppDataTables(db: SupportSQLiteDatabase) {
+        WHOLE_DATABASE_DELETE_ORDER.forEach { table ->
+            db.execSQL("DELETE FROM `$table`")
+        }
+    }
+
+    private fun recreateGeneralPool(db: SupportSQLiteDatabase) {
+        val now = System.currentTimeMillis()
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO `item_pools` (
+                `id`, `name`, `type`, `trip_id`, `is_system`, `created_at_millis`, `updated_at_millis`
+            )
+            VALUES (1, 'General', 'GENERAL', NULL, 1, ?, ?)
+            """.trimIndent(),
+            arrayOf(now, now)
+        )
     }
 
     private fun insertJsonRow(
@@ -479,6 +521,8 @@ class TripBackupRepository(
         const val EXPORT_TYPE_WHOLE_DATABASE = "whole-database"
         const val EXPORT_TYPE_TRIP = "trip"
         const val BLOB_KEY = "__base64Blob"
+        const val MOCK_SEED_PREFERENCES_NAME = "trip-planner-mock-seed"
+        const val MOCK_SEED_CLEARED_KEY = "mockSeedCleared"
         const val MOCK_FAMILY_MEMBER_NAME = "Sarah M."
         const val MOCK_AIRPORT_NAME = "Ben Gurion Airport"
 
