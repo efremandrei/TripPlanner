@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.os.Bundle
 import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -33,6 +34,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -118,6 +120,21 @@ private fun TripPlannerApp() {
     var screen by rememberSaveable { mutableStateOf(Screen.MainMenu) }
     var appSkin by rememberSaveable { mutableStateOf(AppSkin.System) }
     var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
+    val activity = LocalContext.current as? Activity
+
+    fun returnToMainPage() {
+        editingTripId = null
+        screen = Screen.MainMenu
+    }
+
+    BackHandler {
+        if (screen == Screen.MainMenu) {
+            showExitConfirmation = true
+        } else {
+            returnToMainPage()
+        }
+    }
 
     TripPlannerTheme(appSkin = appSkin) {
         Surface(
@@ -157,7 +174,29 @@ private fun TripPlannerApp() {
                     onAppSkinChange = { appSkin = it },
                     editingTripId = editingTripId,
                     onTripSaved = { tripId -> editingTripId = tripId },
-                    onBack = { screen = Screen.TripManagement }
+                    onBack = { returnToMainPage() }
+                )
+            }
+            if (showExitConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showExitConfirmation = false },
+                    title = { Text("Exit Trip Planner?") },
+                    text = { Text("Do you want to close the application?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showExitConfirmation = false
+                                activity?.finish()
+                            }
+                        ) {
+                            Text("Exit")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showExitConfirmation = false }) {
+                            Text("Stay")
+                        }
+                    }
                 )
             }
         }
@@ -290,9 +329,37 @@ private fun UseExistingTripScreen(
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
+    val tripRepository = remember(database) { TripRepository(database) }
     val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
     var selectedTripId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var useStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedTripObjects = remember { mutableStateListOf<TripObjectDraft>() }
     val selectedTrip = trips.firstOrNull { it.id == selectedTripId }
+
+    LaunchedEffect(selectedTripId, tripRepository) {
+        val tripId = selectedTripId
+        if (tripId == null) {
+            selectedTripObjects.clear()
+            useStatus = null
+            return@LaunchedEffect
+        }
+
+        useStatus = "Loading trip"
+        runCatching {
+            tripRepository.getEditableTrip(tripId)
+        }.onSuccess { editableTrip ->
+            selectedTripObjects.clear()
+            selectedTripObjects.addAll(editableTrip?.objects.orEmpty())
+            useStatus = if (editableTrip == null) {
+                "Trip #$tripId was not found"
+            } else {
+                "${editableTrip.objects.size} trip items loaded"
+            }
+        }.onFailure { error ->
+            selectedTripObjects.clear()
+            useStatus = error.message ?: "Trip could not be loaded"
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -329,6 +396,34 @@ private fun UseExistingTripScreen(
                     subtitle = tripDateRange(selectedTrip),
                     status = "Selected"
                 )
+                TripMapView(tripObjects = selectedTripObjects)
+                BookingsPanel(tripObjects = selectedTripObjects)
+                PrivateMapPresetPanel(
+                    tripObjects = selectedTripObjects,
+                    isSavedTrip = true,
+                    onOpenGoogleMaps = {
+                        val mapIntent = GoogleMapsIntents.openMapIntent(selectedTripObjects)
+                        if (mapIntent == null) {
+                            useStatus = "Add coordinates before opening Google Maps"
+                        } else {
+                            try {
+                                context.startActivity(mapIntent)
+                            } catch (_: ActivityNotFoundException) {
+                                useStatus = "Google Maps app is not available"
+                            }
+                        }
+                    }
+                )
+                if (selectedTripObjects.isNotEmpty()) {
+                    TripItemsPanel(tripObjects = selectedTripObjects)
+                }
+                useStatus?.let { status ->
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
             Text(
                 text = "Existing trips",
@@ -1659,10 +1754,83 @@ private fun PrivateMapPresetPanel(
                 .fillMaxWidth()
                 .height(48.dp),
             onClick = onOpenGoogleMaps,
-            enabled = mappedItemCount > 0,
+            enabled = tripObjects.isNotEmpty(),
             shape = RoundedCornerShape(8.dp)
         ) {
             Text("Open in Google Maps")
+        }
+    }
+}
+
+@Composable
+private fun TripItemsPanel(
+    tripObjects: List<TripObjectDraft>,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Trip items",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        tripObjects
+            .sortedBy { it.priorityOrder }
+            .forEach { tripObject ->
+                TripItemSummaryRow(tripObject = tripObject)
+            }
+    }
+}
+
+@Composable
+private fun TripItemSummaryRow(
+    tripObject: TripObjectDraft
+) {
+    val accent = accentForTripObjectType(tripObject.type)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = tripObject.priorityOrder.toString(),
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = tripObject.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = tripObject.type.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
