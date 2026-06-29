@@ -15,6 +15,11 @@ data class CreatedTripResult(
     val privateMapPresetId: Long?
 )
 
+data class EditableTripDraft(
+    val trip: TripEntity,
+    val objects: List<TripObjectDraft>
+)
+
 class TripRepository(
     private val database: TripPlannerDatabase
 ) {
@@ -38,41 +43,11 @@ class TripRepository(
                 )
             )
 
-            val localToStoredObjectIds = LinkedHashMap<Long, Long>()
-            objects.sortedBy { it.priorityOrder }.forEach { draftObject ->
-                val storedObjectId = database.tripObjectDao().insertObject(
-                    TripObjectEntity(
-                        tripId = tripId,
-                        type = draftObject.type,
-                        name = draftObject.name,
-                        priorityOrder = draftObject.priorityOrder,
-                        createdAtMillis = now,
-                        updatedAtMillis = now
-                    )
-                )
-                localToStoredObjectIds[draftObject.id] = storedObjectId
-                database.tripObjectDao().replaceObjectAttributes(
-                    objectId = storedObjectId,
-                    attributes = draftObject.attributes.map { (attribute, value) ->
-                        TripObjectAttributeEntity(
-                            objectId = storedObjectId,
-                            attribute = attribute,
-                            value = value
-                        )
-                    }
-                )
-            }
-
-            objects.forEach { draftObject ->
-                val storedObjectId = localToStoredObjectIds[draftObject.id] ?: return@forEach
-                val relatedStoredObjectIds = draftObject.relatedObjectIds
-                    .mapNotNull { localToStoredObjectIds[it] }
-                    .toSet()
-                database.tripObjectDao().replaceObjectRelations(
-                    objectId = storedObjectId,
-                    relatedObjectIds = relatedStoredObjectIds
-                )
-            }
+            val localToStoredObjectIds = insertTripObjects(
+                tripId = tripId,
+                objects = objects,
+                timestampMillis = now
+            )
 
             val privateMapPresetId = createPrivateMapPreset(
                 tripId = tripId,
@@ -87,6 +62,120 @@ class TripRepository(
                 privateMapPresetId = privateMapPresetId
             )
         }
+    }
+
+    suspend fun updateTrip(
+        tripId: Long,
+        destination: String,
+        startDate: String,
+        endDate: String,
+        objects: List<TripObjectDraft>
+    ): CreatedTripResult {
+        return database.withTransaction {
+            val now = System.currentTimeMillis()
+            val existingTrip = database.tripDao().getTrip(tripId)
+                ?: error("Trip #$tripId was not found")
+            val tripTitle = destination.ifBlank { "Untitled trip" }
+
+            database.tripDao().updateTrip(
+                existingTrip.copy(
+                    title = tripTitle,
+                    destination = destination.trim(),
+                    startDate = startDate.trim(),
+                    endDate = endDate.trim(),
+                    updatedAtMillis = now
+                )
+            )
+
+            database.mapPresetDao().deletePresetsForTrip(tripId)
+            database.tripObjectDao().deleteObjectsForTrip(tripId)
+
+            val localToStoredObjectIds = insertTripObjects(
+                tripId = tripId,
+                objects = objects,
+                timestampMillis = now
+            )
+            val privateMapPresetId = createPrivateMapPreset(
+                tripId = tripId,
+                tripTitle = tripTitle,
+                objects = objects,
+                localToStoredObjectIds = localToStoredObjectIds,
+                createdAtMillis = now
+            )
+
+            CreatedTripResult(
+                tripId = tripId,
+                privateMapPresetId = privateMapPresetId
+            )
+        }
+    }
+
+    suspend fun getEditableTrip(tripId: Long): EditableTripDraft? {
+        return database.withTransaction {
+            val tripWithObjects = database.tripDao().getTripWithObjects(tripId)
+                ?: return@withTransaction null
+            EditableTripDraft(
+                trip = tripWithObjects.trip,
+                objects = tripWithObjects.objects.map { details ->
+                    TripObjectDraft(
+                        id = details.objectEntity.id,
+                        type = details.objectEntity.type,
+                        name = details.objectEntity.name,
+                        priorityOrder = details.objectEntity.priorityOrder,
+                        attributes = details.attributes.associate { attribute ->
+                            attribute.attribute to attribute.value
+                        },
+                        relatedObjectIds = details.relations
+                            .map { relation -> relation.relatedObjectId }
+                            .toSet()
+                    )
+                }
+            )
+        }
+    }
+
+    private suspend fun insertTripObjects(
+        tripId: Long,
+        objects: List<TripObjectDraft>,
+        timestampMillis: Long
+    ): Map<Long, Long> {
+        val localToStoredObjectIds = LinkedHashMap<Long, Long>()
+        objects.sortedBy { it.priorityOrder }.forEach { draftObject ->
+            val storedObjectId = database.tripObjectDao().insertObject(
+                TripObjectEntity(
+                    tripId = tripId,
+                    type = draftObject.type,
+                    name = draftObject.name,
+                    priorityOrder = draftObject.priorityOrder,
+                    createdAtMillis = timestampMillis,
+                    updatedAtMillis = timestampMillis
+                )
+            )
+            localToStoredObjectIds[draftObject.id] = storedObjectId
+            database.tripObjectDao().replaceObjectAttributes(
+                objectId = storedObjectId,
+                attributes = draftObject.attributes.map { (attribute, value) ->
+                    TripObjectAttributeEntity(
+                        objectId = storedObjectId,
+                        attribute = attribute,
+                        value = value
+                    )
+                }
+            )
+        }
+
+        objects.forEach { draftObject ->
+            val storedObjectId = localToStoredObjectIds[draftObject.id] ?: return@forEach
+            val relatedStoredObjectIds = draftObject.relatedObjectIds
+                .mapNotNull { localToStoredObjectIds[it] }
+                .toSet()
+            database.tripObjectDao().replaceObjectRelations(
+                objectId = storedObjectId,
+                relatedObjectIds = relatedStoredObjectIds
+            )
+        }
+
+        return localToStoredObjectIds
     }
 
     private suspend fun createPrivateMapPreset(

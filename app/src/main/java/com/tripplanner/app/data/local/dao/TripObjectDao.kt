@@ -30,6 +30,9 @@ interface TripObjectDao {
     @Query("DELETE FROM trip_objects WHERE id = :objectId")
     suspend fun deleteObject(objectId: Long)
 
+    @Query("DELETE FROM trip_objects WHERE trip_id = :tripId")
+    suspend fun deleteObjectsForTrip(tripId: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAttributes(attributes: List<TripObjectAttributeEntity>)
 

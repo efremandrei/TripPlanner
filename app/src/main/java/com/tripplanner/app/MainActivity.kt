@@ -45,7 +45,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -78,6 +80,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.tripplanner.app.data.google.GooglePlaceDetails
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
+import com.tripplanner.app.data.local.entity.TripEntity
 import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectAttributeInputKind
 import com.tripplanner.app.model.TripObjectDraft
@@ -98,6 +101,8 @@ class MainActivity : ComponentActivity() {
 
 private enum class Screen {
     MainMenu,
+    TripManagement,
+    UseExistingTrip,
     PlanNewTrip
 }
 
@@ -111,6 +116,7 @@ private enum class AppSkin(val label: String) {
 private fun TripPlannerApp() {
     var screen by rememberSaveable { mutableStateOf(Screen.MainMenu) }
     var appSkin by rememberSaveable { mutableStateOf(AppSkin.System) }
+    var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     TripPlannerTheme(appSkin = appSkin) {
         Surface(
@@ -121,13 +127,35 @@ private fun TripPlannerApp() {
                 Screen.MainMenu -> MainMenuScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
-                    onPlanNewTrip = { screen = Screen.PlanNewTrip }
+                    onManageTrips = { screen = Screen.TripManagement },
+                    onUseExistingTrip = { screen = Screen.UseExistingTrip }
+                )
+
+                Screen.TripManagement -> TripManagementScreen(
+                    appSkin = appSkin,
+                    onAppSkinChange = { appSkin = it },
+                    onBack = { screen = Screen.MainMenu },
+                    onNewTrip = {
+                        editingTripId = null
+                        screen = Screen.PlanNewTrip
+                    },
+                    onEditTrip = { tripId ->
+                        editingTripId = tripId
+                        screen = Screen.PlanNewTrip
+                    }
+                )
+
+                Screen.UseExistingTrip -> UseExistingTripScreen(
+                    appSkin = appSkin,
+                    onAppSkinChange = { appSkin = it },
+                    onBack = { screen = Screen.MainMenu }
                 )
 
                 Screen.PlanNewTrip -> PlanNewTripScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
-                    onBack = { screen = Screen.MainMenu }
+                    editingTripId = editingTripId,
+                    onBack = { screen = Screen.TripManagement }
                 )
             }
         }
@@ -138,11 +166,10 @@ private fun TripPlannerApp() {
 private fun MainMenuScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
-    onPlanNewTrip: () -> Unit
+    onManageTrips: () -> Unit,
+    onUseExistingTrip: () -> Unit
 ) {
-    Scaffold(
-        bottomBar = { BottomAppNavigation(activeItem = "Home") }
-    ) { innerPadding ->
+    Scaffold { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -157,45 +184,247 @@ private fun MainMenuScreen(
                 subtitle = "Build a clear itinerary, bookings list, and map plan",
                 status = "Local first"
             )
-            TripSummaryStrip(
-                firstTitle = "Offline",
-                firstSubtitle = "Room storage",
-                secondTitle = "Maps",
-                secondSubtitle = "When online",
-                status = "Ready"
-            )
             SkinSelector(
                 modifier = Modifier.fillMaxWidth(),
                 selectedSkin = appSkin,
                 onSkinSelected = onAppSkinChange
             )
             Text(
-                text = "Plan your trip",
+                text = "Choose how to continue",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             HomeActionCard(
-                title = "Plan a new trip",
-                subtitle = "Create itinerary items, priorities, links, and map details",
+                title = "Add new/edit existing trip",
+                subtitle = "Create a new trip or update a saved local trip",
                 accent = MaterialTheme.colorScheme.primary,
-                onClick = onPlanNewTrip
+                onClick = onManageTrips
             )
             HomeActionCard(
-                title = "Open existing trip",
-                subtitle = "Coming next: continue a saved local trip",
+                title = "Use existing trip",
+                subtitle = "Open a saved plan for itinerary, bookings, and maps",
                 accent = Color(0xFF4F7CAC),
-                enabled = false,
-                onClick = {}
+                onClick = onUseExistingTrip
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TripManagementScreen(
+    appSkin: AppSkin,
+    onAppSkinChange: (AppSkin) -> Unit,
+    onBack: () -> Unit,
+    onNewTrip: () -> Unit,
+    onEditTrip: (Long) -> Unit
+) {
+    val context = LocalContext.current
+    val database = (context.applicationContext as TripPlannerApplication).database
+    val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Add new/edit existing trip") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) {
+                        Text("Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            AppHeaderBar()
+            SkinSelector(
+                modifier = Modifier.fillMaxWidth(),
+                selectedSkin = appSkin,
+                onSkinSelected = onAppSkinChange
             )
             HomeActionCard(
-                title = "Trips archive",
-                subtitle = "Coming next: browse archived plans",
-                accent = Color(0xFFFF8A3D),
-                enabled = false,
-                onClick = {}
+                title = "+ New Trip",
+                subtitle = "Start a new local trip plan",
+                accent = MaterialTheme.colorScheme.primary,
+                onClick = onNewTrip
             )
-            DashboardPreviewPanel()
+            Text(
+                text = "Existing trips",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (trips.isEmpty()) {
+                EmptyTripsCard(text = "No existing trips yet")
+            } else {
+                trips.forEach { trip ->
+                    SavedTripCard(
+                        trip = trip,
+                        actionLabel = "Edit",
+                        accent = MaterialTheme.colorScheme.primary,
+                        onClick = { onEditTrip(trip.id) }
+                    )
+                }
+            }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UseExistingTripScreen(
+    appSkin: AppSkin,
+    onAppSkinChange: (AppSkin) -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val database = (context.applicationContext as TripPlannerApplication).database
+    val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
+    var selectedTripId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedTrip = trips.firstOrNull { it.id == selectedTripId }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Use existing trip") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) {
+                        Text("Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            AppHeaderBar()
+            SkinSelector(
+                modifier = Modifier.fillMaxWidth(),
+                selectedSkin = appSkin,
+                onSkinSelected = onAppSkinChange
+            )
+            if (selectedTrip != null) {
+                TripHeroPanel(
+                    title = selectedTrip.title,
+                    subtitle = tripDateRange(selectedTrip),
+                    status = "Selected"
+                )
+            }
+            Text(
+                text = "Existing trips",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            if (trips.isEmpty()) {
+                EmptyTripsCard(text = "No saved trips to use yet")
+            } else {
+                trips.forEach { trip ->
+                    SavedTripCard(
+                        trip = trip,
+                        actionLabel = if (trip.id == selectedTripId) "Using" else "Use",
+                        accent = Color(0xFF4F7CAC),
+                        onClick = { selectedTripId = trip.id }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedTripCard(
+    trip: TripEntity,
+    actionLabel: String,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    Button(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(82.dp),
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = trip.title.firstOrNull()?.uppercase() ?: "T",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = trip.title.ifBlank { "Untitled trip" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = tripDateRange(trip),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = actionLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = accent,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyTripsCard(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Text(
+            modifier = Modifier.padding(16.dp),
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -735,22 +964,24 @@ private fun BottomAppNavigation(
 private fun PlanNewTripScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    editingTripId: Long?,
     onBack: () -> Unit
 ) {
-    var destination by rememberSaveable { mutableStateOf("") }
-    var startDate by rememberSaveable { mutableStateOf("") }
-    var endDate by rememberSaveable { mutableStateOf("") }
-    var selectedObjectType by rememberSaveable { mutableStateOf(TripObjectType.FAMILY_MEMBER) }
-    var objectName by rememberSaveable { mutableStateOf("") }
-    var priorityOrder by rememberSaveable { mutableStateOf("1") }
-    var editingObjectId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var nextObjectId by rememberSaveable { mutableLongStateOf(1L) }
-    var saveStatus by rememberSaveable { mutableStateOf<String?>(null) }
-    var googleFetchStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var destination by rememberSaveable(editingTripId) { mutableStateOf("") }
+    var startDate by rememberSaveable(editingTripId) { mutableStateOf("") }
+    var endDate by rememberSaveable(editingTripId) { mutableStateOf("") }
+    var selectedObjectType by rememberSaveable(editingTripId) { mutableStateOf(TripObjectType.FAMILY_MEMBER) }
+    var objectName by rememberSaveable(editingTripId) { mutableStateOf("") }
+    var priorityOrder by rememberSaveable(editingTripId) { mutableStateOf("1") }
+    var editingObjectId by rememberSaveable(editingTripId) { mutableStateOf<Long?>(null) }
+    var nextObjectId by rememberSaveable(editingTripId) { mutableLongStateOf(1L) }
+    var saveStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
+    var googleFetchStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
     var isFetchingGoogleDetails by remember { mutableStateOf(false) }
-    val attributeValues = remember { mutableStateMapOf<TripObjectAttribute, String>() }
-    val relatedObjectIds = remember { mutableStateListOf<Long>() }
-    val tripObjects = remember { mutableStateListOf<TripObjectDraft>() }
+    var isLoadingTrip by remember(editingTripId) { mutableStateOf(editingTripId != null) }
+    val attributeValues = remember(editingTripId) { mutableStateMapOf<TripObjectAttribute, String>() }
+    val relatedObjectIds = remember(editingTripId) { mutableStateListOf<Long>() }
+    val tripObjects = remember(editingTripId) { mutableStateListOf<TripObjectDraft>() }
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
     val tripRepository = remember(database) { TripRepository(database) }
@@ -761,6 +992,36 @@ private fun PlanNewTripScreen(
         )
     }
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(editingTripId, tripRepository) {
+        if (editingTripId == null) {
+            isLoadingTrip = false
+            return@LaunchedEffect
+        }
+
+        isLoadingTrip = true
+        runCatching {
+            tripRepository.getEditableTrip(editingTripId)
+        }.onSuccess { editableTrip ->
+            if (editableTrip == null) {
+                saveStatus = "Trip #$editingTripId was not found"
+            } else {
+                destination = editableTrip.trip.destination
+                startDate = editableTrip.trip.startDate
+                endDate = editableTrip.trip.endDate
+                tripObjects.clear()
+                tripObjects.addAll(editableTrip.objects)
+                nextObjectId = (editableTrip.objects.maxOfOrNull { it.id } ?: 0L) + 1L
+                priorityOrder = (
+                    (editableTrip.objects.maxOfOrNull { it.priorityOrder } ?: 0) + 1
+                ).toString()
+                saveStatus = null
+            }
+        }.onFailure { error ->
+            saveStatus = error.message ?: "Trip could not be loaded"
+        }
+        isLoadingTrip = false
+    }
 
     fun nextAvailablePriority(): Int {
         val usedOrders = tripObjects.map { it.priorityOrder }.toSet()
@@ -832,7 +1093,9 @@ private fun PlanNewTripScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Trip Planner") },
+                title = {
+                    Text(if (editingTripId == null) "Add new trip" else "Edit existing trip")
+                },
                 navigationIcon = {
                     TextButton(onClick = onBack) {
                         Text("Back")
@@ -842,8 +1105,7 @@ private fun PlanNewTripScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
-        },
-        bottomBar = { BottomAppNavigation(activeItem = "My Trips") }
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -856,7 +1118,12 @@ private fun PlanNewTripScreen(
             TripHeroPanel(
                 title = destination.ifBlank { "New trip adventure" },
                 subtitle = tripDateSubtitle(startDate = startDate, endDate = endDate),
-                status = if (tripObjects.isEmpty()) "Draft" else "Planned"
+                status = when {
+                    isLoadingTrip -> "Loading"
+                    editingTripId != null -> "Editing"
+                    tripObjects.isEmpty() -> "Draft"
+                    else -> "Planned"
+                }
             )
             TripSummaryStrip(
                 firstTitle = "${tripObjects.size} Items",
@@ -1154,24 +1421,45 @@ private fun PlanNewTripScreen(
                     .height(54.dp),
                 onClick = {
                     coroutineScope.launch {
-                        val result = tripRepository.createTrip(
-                            destination = destination,
-                            startDate = startDate,
-                            endDate = endDate,
-                            objects = tripObjects
-                        )
-                        saveStatus = buildString {
-                            append("Trip saved locally #${result.tripId}")
-                            result.privateMapPresetId?.let { presetId ->
-                                append(". Private map preset #$presetId")
+                        runCatching {
+                            if (editingTripId == null) {
+                                tripRepository.createTrip(
+                                    destination = destination,
+                                    startDate = startDate,
+                                    endDate = endDate,
+                                    objects = tripObjects
+                                )
+                            } else {
+                                tripRepository.updateTrip(
+                                    tripId = editingTripId,
+                                    destination = destination,
+                                    startDate = startDate,
+                                    endDate = endDate,
+                                    objects = tripObjects
+                                )
                             }
+                        }.onSuccess { result ->
+                            saveStatus = buildString {
+                                append(
+                                    if (editingTripId == null) {
+                                        "Trip saved locally #${result.tripId}"
+                                    } else {
+                                        "Trip updated locally #${result.tripId}"
+                                    }
+                                )
+                                result.privateMapPresetId?.let { presetId ->
+                                    append(". Private map preset #$presetId")
+                                }
+                            }
+                        }.onFailure { error ->
+                            saveStatus = error.message ?: "Trip could not be saved"
                         }
                     }
                 },
-                enabled = destination.isNotBlank(),
+                enabled = destination.isNotBlank() && !isLoadingTrip,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Create trip")
+                Text(if (editingTripId == null) "Create trip" else "Save trip")
             }
             saveStatus?.let { status ->
                 Text(
@@ -1191,6 +1479,13 @@ private fun tripDateSubtitle(
     val start = startDate.ifBlank { "Start date" }
     val end = endDate.ifBlank { "End date" }
     return "$start - $end"
+}
+
+private fun tripDateRange(trip: TripEntity): String {
+    return tripDateSubtitle(
+        startDate = trip.startDate,
+        endDate = trip.endDate
+    )
 }
 
 @Composable
@@ -1714,7 +2009,8 @@ private fun MainMenuPreview() {
         MainMenuScreen(
             appSkin = AppSkin.System,
             onAppSkinChange = {},
-            onPlanNewTrip = {}
+            onManageTrips = {},
+            onUseExistingTrip = {}
         )
     }
 }
@@ -1726,6 +2022,7 @@ private fun PlanNewTripPreview() {
         PlanNewTripScreen(
             appSkin = AppSkin.System,
             onAppSkinChange = {},
+            editingTripId = null,
             onBack = {}
         )
     }

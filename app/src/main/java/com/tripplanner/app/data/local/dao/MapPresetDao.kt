@@ -18,4 +18,7 @@ interface MapPresetDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPresetItems(items: List<MapPresetItemEntity>)
+
+    @Query("DELETE FROM map_presets WHERE trip_id = :tripId")
+    suspend fun deletePresetsForTrip(tripId: Long)
 }
