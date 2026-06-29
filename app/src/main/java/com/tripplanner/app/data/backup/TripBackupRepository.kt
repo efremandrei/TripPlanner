@@ -53,23 +53,15 @@ class TripBackupRepository(
         mockSeedPreferences.edit()
             .putBoolean(MOCK_SEED_CLEARED_KEY, false)
             .apply()
-        val firstTripId = seedTokyoTrip()
-        val sharedFamilyMember = database.poolItemDao()
-            .findGeneralPoolItem(MOCK_FAMILY_MEMBER_NAME, TripObjectType.FAMILY_MEMBER)
-        val sharedAirport = database.poolItemDao()
-            .findGeneralPoolItem(MOCK_AIRPORT_NAME, TripObjectType.TRANSPORTATION)
-        val londonTrip = tripRepository.createTrip(
-            destination = "London, United Kingdom",
-            startDate = "2026-09-10",
-            endDate = "2026-09-15",
-            objects = londonMockObjects(
-                sharedFamilyMemberId = sharedFamilyMember?.id,
-                sharedAirportId = sharedAirport?.id
-            )
+        val englandTrip = tripRepository.createTrip(
+            destination = "England family circuit: London, Oxford, Bath, York, Manchester",
+            startDate = "2026-08-01",
+            endDate = "2026-08-10",
+            objects = englandFamilyTripObjects()
         )
 
         return BackupOperationResult(
-            message = "Mock DB populated: trips #$firstTripId and #${londonTrip.tripId}"
+            message = "Mock DB populated: 10-day England family trip #${englandTrip.tripId}"
         )
     }
 
@@ -174,169 +166,811 @@ class TripBackupRepository(
 
     fun exportDirectoryPath(): String = exportDirectory.absolutePath
 
-    private suspend fun seedTokyoTrip(): Long {
-        val result = tripRepository.createTrip(
-            destination = "Tokyo, Japan",
-            startDate = "2026-07-15",
-            endDate = "2026-07-28",
-            objects = tokyoMockObjects()
-        )
-        return result.tripId
-    }
+    private fun englandFamilyTripObjects(): List<TripObjectDraft> {
+        val objects = mutableListOf<TripObjectDraft>()
+        var nextId = -1L
+        var nextPriority = 1
 
-    private fun tokyoMockObjects(): List<TripObjectDraft> {
-        val sarahId = -1L
-        val airportId = -2L
-        val hotelId = -3L
-        val gardenId = -4L
-        val ramenId = -5L
-        return listOf(
-            TripObjectDraft(
-                id = sarahId,
+        fun addObject(
+            type: TripObjectType,
+            name: String,
+            attributes: Map<TripObjectAttribute, String>,
+            relatedObjectIds: Set<Long> = emptySet()
+        ): Long {
+            val id = nextId--
+            objects += TripObjectDraft(
+                id = id,
+                type = type,
+                name = name,
+                priorityOrder = nextPriority++,
+                attributes = attributes,
+                relatedObjectIds = relatedObjectIds
+            )
+            return id
+        }
+
+        fun addFamilyMember(
+            name: String,
+            passportNumber: String,
+            relation: String,
+            age: Int,
+            sex: String,
+            notes: String
+        ): Long {
+            return addObject(
                 type = TripObjectType.FAMILY_MEMBER,
-                name = MOCK_FAMILY_MEMBER_NAME,
-                priorityOrder = 1,
+                name = name,
                 attributes = mapOf(
-                    TripObjectAttribute.PASSPORT_NUMBER to "MOCK123456",
-                    TripObjectAttribute.RELATION to "Parent",
-                    TripObjectAttribute.AGE to "34",
-                    TripObjectAttribute.SEX to "Female",
-                    TripObjectAttribute.NOTES to "Mock reusable family member"
-                ),
-                relatedObjectIds = emptySet()
-            ),
-            TripObjectDraft(
-                id = airportId,
+                    TripObjectAttribute.PASSPORT_NUMBER to passportNumber,
+                    TripObjectAttribute.RELATION to relation,
+                    TripObjectAttribute.AGE to age.toString(),
+                    TripObjectAttribute.SEX to sex,
+                    TripObjectAttribute.NOTES to notes
+                )
+            )
+        }
+
+        val fatherId = addFamilyMember(
+            name = "Andrei Mock",
+            passportNumber = "ENG-MOCK-1001",
+            relation = "Father",
+            age = 42,
+            sex = "Male",
+            notes = "Primary driver and booking contact"
+        )
+        val motherId = addFamilyMember(
+            name = "Sarah Mock",
+            passportNumber = "ENG-MOCK-1002",
+            relation = "Mother",
+            age = 39,
+            sex = "Female",
+            notes = "Keeps hotel confirmations and food preferences"
+        )
+        val sonId = addFamilyMember(
+            name = "Noah Mock",
+            passportNumber = "ENG-MOCK-1003",
+            relation = "Child",
+            age = 12,
+            sex = "Male",
+            notes = "Prefers museums, trains, and pizza"
+        )
+        val daughterId = addFamilyMember(
+            name = "Maya Mock",
+            passportNumber = "ENG-MOCK-1004",
+            relation = "Child",
+            age = 8,
+            sex = "Female",
+            notes = "Needs earlier dinners and short walking breaks"
+        )
+        val familyIds = setOf(fatherId, motherId, sonId, daughterId)
+
+        fun familyAnd(vararg objectIds: Long): Set<Long> {
+            return (familyIds + objectIds.toSet()).toSet()
+        }
+
+        fun addTransport(
+            name: String,
+            mode: String,
+            departureLocation: String,
+            departureLatitude: String,
+            departureLongitude: String,
+            departureDateTime: String,
+            arrivalLocation: String,
+            arrivalLatitude: String,
+            arrivalLongitude: String,
+            arrivalDateTime: String,
+            price: String,
+            stopsLocations: String,
+            routeMap: String,
+            relatedObjectIds: Set<Long>
+        ): Long {
+            return addObject(
                 type = TripObjectType.TRANSPORTATION,
-                name = MOCK_AIRPORT_NAME,
-                priorityOrder = 2,
+                name = name,
                 attributes = mapOf(
-                    TripObjectAttribute.TRANSPORTATION_MODE to "Commercial plane",
-                    TripObjectAttribute.DEPARTURE_LOCATION to "Ben Gurion Airport, Israel",
-                    TripObjectAttribute.DEPARTURE_LATITUDE to "32.0055",
-                    TripObjectAttribute.DEPARTURE_LONGITUDE to "34.8854",
-                    TripObjectAttribute.STOPS_LOCATIONS to "Reusable mock hub"
+                    TripObjectAttribute.TRANSPORTATION_MODE to mode,
+                    TripObjectAttribute.DEPARTURE_LOCATION to departureLocation,
+                    TripObjectAttribute.DEPARTURE_LATITUDE to departureLatitude,
+                    TripObjectAttribute.DEPARTURE_LONGITUDE to departureLongitude,
+                    TripObjectAttribute.DEPARTURE_DATE_TIME to departureDateTime,
+                    TripObjectAttribute.ARRIVAL_LOCATION to arrivalLocation,
+                    TripObjectAttribute.ARRIVAL_LATITUDE to arrivalLatitude,
+                    TripObjectAttribute.ARRIVAL_LONGITUDE to arrivalLongitude,
+                    TripObjectAttribute.ARRIVAL_DATE_TIME to arrivalDateTime,
+                    TripObjectAttribute.PRICE to price,
+                    TripObjectAttribute.STOPS_LOCATIONS to stopsLocations,
+                    TripObjectAttribute.ROUTE_MAP to routeMap
                 ),
-                relatedObjectIds = setOf(sarahId)
-            ),
-            TripObjectDraft(
-                id = hotelId,
+                relatedObjectIds = relatedObjectIds
+            )
+        }
+
+        fun addHotel(
+            name: String,
+            address: String,
+            latitude: String,
+            longitude: String,
+            websiteUrl: String,
+            phoneNumber: String,
+            emailAddress: String,
+            checkIn: String,
+            checkOut: String,
+            isWithBreakfast: String,
+            roomNumber: String,
+            relatedObjectIds: Set<Long>
+        ): Long {
+            return addObject(
                 type = TripObjectType.HOTEL,
-                name = "Park Hyatt Tokyo",
-                priorityOrder = 3,
+                name = name,
                 attributes = mapOf(
-                    TripObjectAttribute.ADDRESS to "3-7-1-2 Nishi Shinjuku, Tokyo",
-                    TripObjectAttribute.LATITUDE to "35.6852",
-                    TripObjectAttribute.LONGITUDE to "139.6909",
-                    TripObjectAttribute.WEBSITE_URL to "https://www.hyatt.com",
-                    TripObjectAttribute.PHONE_NUMBER to "+81 3 5322 1234",
-                    TripObjectAttribute.CHECK_IN to "2026-07-16 15:00",
-                    TripObjectAttribute.CHECK_OUT to "2026-07-28 11:00",
-                    TripObjectAttribute.IS_WITH_BREAKFAST to "Yes",
-                    TripObjectAttribute.ROOM_NUMBER to "Mock 1707"
+                    TripObjectAttribute.ADDRESS to address,
+                    TripObjectAttribute.LATITUDE to latitude,
+                    TripObjectAttribute.LONGITUDE to longitude,
+                    TripObjectAttribute.GOOGLE_MAPS_URL to "https://maps.google.com/?q=${name.safeUrlQuery()}",
+                    TripObjectAttribute.WEBSITE_URL to websiteUrl,
+                    TripObjectAttribute.PHONE_NUMBER to phoneNumber,
+                    TripObjectAttribute.EMAIL_ADDRESS to emailAddress,
+                    TripObjectAttribute.CHECK_IN to checkIn,
+                    TripObjectAttribute.CHECK_OUT to checkOut,
+                    TripObjectAttribute.IS_WITH_BREAKFAST to isWithBreakfast,
+                    TripObjectAttribute.ROOM_NUMBER to roomNumber
                 ),
-                relatedObjectIds = setOf(sarahId, airportId)
-            ),
-            TripObjectDraft(
-                id = gardenId,
-                type = TripObjectType.FREE_ATTRACTION,
-                name = "Shinjuku Gyoen National Garden",
-                priorityOrder = 4,
-                attributes = mapOf(
-                    TripObjectAttribute.DESCRIPTION to "Morning park visit",
-                    TripObjectAttribute.ADDRESS to "11 Naitomachi, Shinjuku City, Tokyo",
-                    TripObjectAttribute.LATITUDE to "35.6852",
-                    TripObjectAttribute.LONGITUDE to "139.7100",
-                    TripObjectAttribute.WORKING_HOURS to "09:00-17:30",
-                    TripObjectAttribute.PLANNED_VISIT_DATE_TIME to "2026-07-17 09:00"
-                ),
-                relatedObjectIds = setOf(hotelId)
-            ),
-            TripObjectDraft(
-                id = ramenId,
+                relatedObjectIds = relatedObjectIds
+            )
+        }
+
+        fun addFoodPlace(
+            name: String,
+            foodType: String,
+            address: String,
+            latitude: String,
+            longitude: String,
+            websiteUrl: String,
+            phoneNumber: String,
+            emailAddress: String,
+            workingHours: String,
+            menuWithPrices: String,
+            relatedObjectIds: Set<Long>
+        ): Long {
+            return addObject(
                 type = TripObjectType.FOOD_PLACE,
-                name = "Ichiran Shinjuku",
-                priorityOrder = 5,
+                name = name,
                 attributes = mapOf(
-                    TripObjectAttribute.FOOD_TYPE to "Ramen",
-                    TripObjectAttribute.ADDRESS to "Shinjuku, Tokyo",
-                    TripObjectAttribute.LATITUDE to "35.6938",
-                    TripObjectAttribute.LONGITUDE to "139.7034",
-                    TripObjectAttribute.WORKING_HOURS to "10:00-23:00",
-                    TripObjectAttribute.ENGLISH_MENU_WITH_PRICES to "Classic ramen: 980 JPY"
+                    TripObjectAttribute.WEBSITE_URL to websiteUrl,
+                    TripObjectAttribute.PHONE_NUMBER to phoneNumber,
+                    TripObjectAttribute.EMAIL_ADDRESS to emailAddress,
+                    TripObjectAttribute.FOOD_TYPE to foodType,
+                    TripObjectAttribute.ADDRESS to address,
+                    TripObjectAttribute.LATITUDE to latitude,
+                    TripObjectAttribute.LONGITUDE to longitude,
+                    TripObjectAttribute.GOOGLE_MAPS_URL to "https://maps.google.com/?q=${name.safeUrlQuery()}",
+                    TripObjectAttribute.WORKING_HOURS to workingHours,
+                    TripObjectAttribute.ENGLISH_MENU_WITH_PRICES to menuWithPrices
                 ),
-                relatedObjectIds = setOf(gardenId)
+                relatedObjectIds = relatedObjectIds
             )
-        )
-    }
+        }
 
-    private suspend fun londonMockObjects(
-        sharedFamilyMemberId: Long?,
-        sharedAirportId: Long?
-    ): List<TripObjectDraft> {
-        val sarahId = sharedFamilyMemberId ?: -1L
-        val airportId = sharedAirportId ?: -2L
-        val hotelId = -3L
-        val museumId = -4L
-        val shopId = -5L
-        val familyMember = sharedFamilyMemberId?.let { tripRepository.getPoolItemDraft(it) }
-            ?: tokyoMockObjects().first { it.name == MOCK_FAMILY_MEMBER_NAME }
-        val airport = sharedAirportId?.let { tripRepository.getPoolItemDraft(it) }
-            ?: tokyoMockObjects().first { it.name == MOCK_AIRPORT_NAME }
-
-        return listOf(
-            familyMember.copy(id = sarahId, priorityOrder = 1, relatedObjectIds = emptySet()),
-            airport.copy(
-                id = airportId,
-                priorityOrder = 2,
-                relatedObjectIds = setOf(sarahId)
-            ),
-            TripObjectDraft(
-                id = hotelId,
-                type = TripObjectType.HOTEL,
-                name = "Mock Covent Garden Hotel",
-                priorityOrder = 3,
-                attributes = mapOf(
-                    TripObjectAttribute.ADDRESS to "Covent Garden, London",
-                    TripObjectAttribute.LATITUDE to "51.5117",
-                    TripObjectAttribute.LONGITUDE to "-0.1240",
-                    TripObjectAttribute.CHECK_IN to "2026-09-10 15:00",
-                    TripObjectAttribute.CHECK_OUT to "2026-09-15 11:00",
-                    TripObjectAttribute.IS_WITH_BREAKFAST to "No"
-                ),
-                relatedObjectIds = setOf(sarahId, airportId)
-            ),
-            TripObjectDraft(
-                id = museumId,
-                type = TripObjectType.FREE_ATTRACTION,
-                name = "British Museum",
-                priorityOrder = 4,
-                attributes = mapOf(
-                    TripObjectAttribute.DESCRIPTION to "Mock museum visit",
-                    TripObjectAttribute.ADDRESS to "Great Russell St, London",
-                    TripObjectAttribute.LATITUDE to "51.5194",
-                    TripObjectAttribute.LONGITUDE to "-0.1270",
-                    TripObjectAttribute.WORKING_HOURS to "10:00-17:00",
-                    TripObjectAttribute.PLANNED_VISIT_DATE_TIME to "2026-09-11 10:30"
-                ),
-                relatedObjectIds = setOf(hotelId)
-            ),
-            TripObjectDraft(
-                id = shopId,
-                type = TripObjectType.SHOP,
-                name = "Covent Garden Market",
-                priorityOrder = 5,
-                attributes = mapOf(
-                    TripObjectAttribute.CATEGORY to "Gifts",
-                    TripObjectAttribute.ADDRESS to "Covent Garden, London",
-                    TripObjectAttribute.LATITUDE to "51.5120",
-                    TripObjectAttribute.LONGITUDE to "-0.1223",
-                    TripObjectAttribute.WORKING_HOURS to "10:00-20:00",
-                    TripObjectAttribute.NOTES to "Mock shopping stop"
-                ),
-                relatedObjectIds = setOf(hotelId, museumId)
+        fun addAttraction(
+            name: String,
+            city: String,
+            paid: Boolean,
+            description: String,
+            address: String,
+            latitude: String,
+            longitude: String,
+            workingHours: String,
+            websiteUrl: String,
+            plannedVisitDateTime: String,
+            ticketPrices: String = "Free",
+            relatedObjectIds: Set<Long>
+        ): Long {
+            val attributes = mutableMapOf(
+                TripObjectAttribute.DESCRIPTION to description,
+                TripObjectAttribute.ADDRESS to address,
+                TripObjectAttribute.LATITUDE to latitude,
+                TripObjectAttribute.LONGITUDE to longitude,
+                TripObjectAttribute.GOOGLE_MAPS_URL to "https://maps.google.com/?q=${name.safeUrlQuery()}+$city",
+                TripObjectAttribute.WORKING_HOURS to workingHours,
+                TripObjectAttribute.WEBSITE_URL to websiteUrl,
+                TripObjectAttribute.PLANNED_VISIT_DATE_TIME to plannedVisitDateTime
             )
+            if (paid) {
+                attributes[TripObjectAttribute.TICKET_PRICES] = ticketPrices
+            }
+            return addObject(
+                type = if (paid) TripObjectType.PAID_ATTRACTION else TripObjectType.FREE_ATTRACTION,
+                name = name,
+                attributes = attributes,
+                relatedObjectIds = relatedObjectIds
+            )
+        }
+
+        val arrivalFlightId = addTransport(
+            name = "Flight TLV to London Heathrow",
+            mode = "Commercial plane",
+            departureLocation = "Ben Gurion Airport, Israel",
+            departureLatitude = "32.0055",
+            departureLongitude = "34.8854",
+            departureDateTime = "2026-08-01 07:30",
+            arrivalLocation = "London Heathrow Airport",
+            arrivalLatitude = "51.4700",
+            arrivalLongitude = "-0.4543",
+            arrivalDateTime = "2026-08-01 11:05",
+            price = "1800 GBP total",
+            stopsLocations = "Direct flight",
+            routeMap = "https://maps.google.com/?q=TLV+to+LHR",
+            relatedObjectIds = familyIds
         )
+
+        val londonHotelId = addHotel(
+            name = "Mock London County Hall Hotel",
+            address = "Belvedere Road, London SE1 7PB",
+            latitude = "51.5010",
+            longitude = "-0.1195",
+            websiteUrl = "https://example.com/london-county-hall",
+            phoneNumber = "+44 20 7000 0101",
+            emailAddress = "london@example.com",
+            checkIn = "2026-08-01 15:00",
+            checkOut = "2026-08-03 10:00",
+            isWithBreakfast = "Yes",
+            roomNumber = "Family room LON-204",
+            relatedObjectIds = familyAnd(arrivalFlightId)
+        )
+        val londonWalkId = addTransport(
+            name = "London Westminster walking loop",
+            mode = "By foot",
+            departureLocation = "Mock London County Hall Hotel",
+            departureLatitude = "51.5010",
+            departureLongitude = "-0.1195",
+            departureDateTime = "2026-08-01 15:30",
+            arrivalLocation = "Westminster Bridge and South Bank",
+            arrivalLatitude = "51.5007",
+            arrivalLongitude = "-0.1246",
+            arrivalDateTime = "2026-08-01 17:30",
+            price = "Free",
+            stopsLocations = "London Eye, Westminster Bridge, South Bank",
+            routeMap = "https://maps.google.com/?q=London+South+Bank+walking+route",
+            relatedObjectIds = familyAnd(londonHotelId)
+        )
+        val londonTowerId = addAttraction(
+            name = "Tower of London",
+            city = "London",
+            paid = true,
+            description = "Historic fortress and Crown Jewels visit",
+            address = "Tower Hill, London EC3N 4AB",
+            latitude = "51.5081",
+            longitude = "-0.0759",
+            workingHours = "09:00-17:30",
+            websiteUrl = "https://www.hrp.org.uk/tower-of-london",
+            plannedVisitDateTime = "2026-08-01 16:00",
+            ticketPrices = "Mock: adult 36 GBP, child 18 GBP",
+            relatedObjectIds = familyAnd(londonHotelId, londonWalkId)
+        )
+        val britishMuseumId = addAttraction(
+            name = "British Museum",
+            city = "London",
+            paid = false,
+            description = "World history museum visit focused on Egypt and Greece",
+            address = "Great Russell Street, London WC1B 3DG",
+            latitude = "51.5194",
+            longitude = "-0.1270",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.britishmuseum.org",
+            plannedVisitDateTime = "2026-08-02 10:00",
+            relatedObjectIds = familyAnd(londonHotelId)
+        )
+        val londonEyeId = addAttraction(
+            name = "London Eye",
+            city = "London",
+            paid = true,
+            description = "Evening skyline ride",
+            address = "Riverside Building, County Hall, London SE1 7PB",
+            latitude = "51.5033",
+            longitude = "-0.1195",
+            workingHours = "10:00-20:30",
+            websiteUrl = "https://www.londoneye.com",
+            plannedVisitDateTime = "2026-08-02 17:00",
+            ticketPrices = "Mock: adult 32 GBP, child 28 GBP",
+            relatedObjectIds = familyAnd(londonHotelId, londonTowerId, britishMuseumId)
+        )
+        addFoodPlace(
+            name = "Dishoom Covent Garden",
+            foodType = "Indian",
+            address = "12 Upper St Martin's Lane, London WC2H 9FB",
+            latitude = "51.5129",
+            longitude = "-0.1269",
+            websiteUrl = "https://www.dishoom.com",
+            phoneNumber = "+44 20 7420 9320",
+            emailAddress = "coventgarden@example.com",
+            workingHours = "08:00-23:00",
+            menuWithPrices = "Mock: bacon naan 12 GBP, chicken ruby 17 GBP, kids plate 8 GBP",
+            relatedObjectIds = familyAnd(londonHotelId, britishMuseumId)
+        )
+        addFoodPlace(
+            name = "Borough Market Kitchen",
+            foodType = "Market food",
+            address = "8 Southwark Street, London SE1 1TL",
+            latitude = "51.5055",
+            longitude = "-0.0910",
+            websiteUrl = "https://boroughmarket.org.uk",
+            phoneNumber = "+44 20 7407 1002",
+            emailAddress = "food@example.com",
+            workingHours = "10:00-17:00",
+            menuWithPrices = "Mock: fish sandwich 11 GBP, pie 9 GBP, lemonade 3 GBP",
+            relatedObjectIds = familyAnd(londonHotelId, londonTowerId)
+        )
+
+        val trainToOxfordId = addTransport(
+            name = "Train London Paddington to Oxford",
+            mode = "Train",
+            departureLocation = "London Paddington Station",
+            departureLatitude = "51.5154",
+            departureLongitude = "-0.1755",
+            departureDateTime = "2026-08-03 09:20",
+            arrivalLocation = "Oxford Station",
+            arrivalLatitude = "51.7534",
+            arrivalLongitude = "-1.2701",
+            arrivalDateTime = "2026-08-03 10:15",
+            price = "96 GBP total",
+            stopsLocations = "Reading",
+            routeMap = "https://maps.google.com/?q=London+Paddington+to+Oxford+Station",
+            relatedObjectIds = familyAnd(londonHotelId)
+        )
+        val oxfordHotelId = addHotel(
+            name = "Mock Oxford Riverside Hotel",
+            address = "Park End Street, Oxford OX1 1HS",
+            latitude = "51.7520",
+            longitude = "-1.2670",
+            websiteUrl = "https://example.com/oxford-riverside",
+            phoneNumber = "+44 1865 000101",
+            emailAddress = "oxford@example.com",
+            checkIn = "2026-08-03 15:00",
+            checkOut = "2026-08-05 10:00",
+            isWithBreakfast = "Yes",
+            roomNumber = "Family room OXF-118",
+            relatedObjectIds = familyAnd(trainToOxfordId)
+        )
+        val oxfordBikeId = addTransport(
+            name = "Oxford family bicycle loop",
+            mode = "Bicycle",
+            departureLocation = "Oxford Riverside Hotel",
+            departureLatitude = "51.7520",
+            departureLongitude = "-1.2670",
+            departureDateTime = "2026-08-04 09:00",
+            arrivalLocation = "Oxford Botanic Garden",
+            arrivalLatitude = "51.7503",
+            arrivalLongitude = "-1.2464",
+            arrivalDateTime = "2026-08-04 09:30",
+            price = "44 GBP bike rental",
+            stopsLocations = "Radcliffe Camera, High Street, Botanic Garden",
+            routeMap = "https://maps.google.com/?q=Oxford+bicycle+route",
+            relatedObjectIds = familyAnd(oxfordHotelId)
+        )
+        val bodleianId = addAttraction(
+            name = "Bodleian Library",
+            city = "Oxford",
+            paid = true,
+            description = "Guided library and historic reading rooms tour",
+            address = "Broad Street, Oxford OX1 3BG",
+            latitude = "51.7541",
+            longitude = "-1.2540",
+            workingHours = "09:00-17:00",
+            websiteUrl = "https://www.bodleian.ox.ac.uk",
+            plannedVisitDateTime = "2026-08-03 14:00",
+            ticketPrices = "Mock: adult 20 GBP, child 10 GBP",
+            relatedObjectIds = familyAnd(oxfordHotelId)
+        )
+        val ashmoleanId = addAttraction(
+            name = "Ashmolean Museum",
+            city = "Oxford",
+            paid = false,
+            description = "Art and archaeology visit",
+            address = "Beaumont Street, Oxford OX1 2PH",
+            latitude = "51.7554",
+            longitude = "-1.2600",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.ashmolean.org",
+            plannedVisitDateTime = "2026-08-04 11:00",
+            relatedObjectIds = familyAnd(oxfordHotelId, oxfordBikeId, bodleianId)
+        )
+        val botanicId = addAttraction(
+            name = "Oxford Botanic Garden",
+            city = "Oxford",
+            paid = true,
+            description = "Garden and glasshouse stop",
+            address = "Rose Lane, Oxford OX1 4AZ",
+            latitude = "51.7503",
+            longitude = "-1.2464",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.obga.ox.ac.uk",
+            plannedVisitDateTime = "2026-08-04 15:00",
+            ticketPrices = "Mock: adult 8 GBP, child 4 GBP",
+            relatedObjectIds = familyAnd(oxfordHotelId, oxfordBikeId, ashmoleanId)
+        )
+        addFoodPlace(
+            name = "Vaults and Garden Cafe",
+            foodType = "Cafe",
+            address = "University Church, High Street, Oxford OX1 4BJ",
+            latitude = "51.7528",
+            longitude = "-1.2534",
+            websiteUrl = "https://www.thevaultsandgarden.com",
+            phoneNumber = "+44 1865 279112",
+            emailAddress = "oxford-cafe@example.com",
+            workingHours = "08:30-17:00",
+            menuWithPrices = "Mock: soup 7 GBP, quiche 9 GBP, cake 4 GBP",
+            relatedObjectIds = familyAnd(oxfordHotelId, bodleianId)
+        )
+        addFoodPlace(
+            name = "The Eagle and Child",
+            foodType = "Pub",
+            address = "49 St Giles, Oxford OX1 3LU",
+            latitude = "51.7584",
+            longitude = "-1.2608",
+            websiteUrl = "https://example.com/eagle-and-child",
+            phoneNumber = "+44 1865 000202",
+            emailAddress = "pub@example.com",
+            workingHours = "12:00-22:00",
+            menuWithPrices = "Mock: fish and chips 15 GBP, pie 14 GBP, kids pasta 7 GBP",
+            relatedObjectIds = familyAnd(oxfordHotelId, ashmoleanId, botanicId)
+        )
+
+        val carToBathId = addTransport(
+            name = "Rental car Oxford to Bath",
+            mode = "Rental car",
+            departureLocation = "Oxford Station car rental",
+            departureLatitude = "51.7534",
+            departureLongitude = "-1.2701",
+            departureDateTime = "2026-08-05 09:00",
+            arrivalLocation = "Bath city centre",
+            arrivalLatitude = "51.3811",
+            arrivalLongitude = "-2.3590",
+            arrivalDateTime = "2026-08-05 11:15",
+            price = "130 GBP car day plus fuel",
+            stopsLocations = "Cotswolds viewpoint, Chippenham",
+            routeMap = "https://maps.google.com/?q=Oxford+to+Bath",
+            relatedObjectIds = familyAnd(oxfordHotelId)
+        )
+        val bathHotelId = addHotel(
+            name = "Mock Bath Georgian Hotel",
+            address = "Queen Square, Bath BA1 2HH",
+            latitude = "51.3837",
+            longitude = "-2.3630",
+            websiteUrl = "https://example.com/bath-georgian",
+            phoneNumber = "+44 1225 000303",
+            emailAddress = "bath@example.com",
+            checkIn = "2026-08-05 15:00",
+            checkOut = "2026-08-07 10:00",
+            isWithBreakfast = "No",
+            roomNumber = "Family room BTH-305",
+            relatedObjectIds = familyAnd(carToBathId)
+        )
+        val bathBusId = addTransport(
+            name = "Bath city bus day pass",
+            mode = "Bus",
+            departureLocation = "Queen Square, Bath",
+            departureLatitude = "51.3837",
+            departureLongitude = "-2.3630",
+            departureDateTime = "2026-08-06 09:30",
+            arrivalLocation = "Royal Crescent, Bath",
+            arrivalLatitude = "51.3867",
+            arrivalLongitude = "-2.3670",
+            arrivalDateTime = "2026-08-06 09:45",
+            price = "18 GBP family pass",
+            stopsLocations = "Bath Abbey, Pulteney Bridge, Royal Crescent",
+            routeMap = "https://maps.google.com/?q=Bath+city+bus",
+            relatedObjectIds = familyAnd(bathHotelId)
+        )
+        val romanBathsId = addAttraction(
+            name = "Roman Baths",
+            city = "Bath",
+            paid = true,
+            description = "Roman history and audio guide",
+            address = "Abbey Churchyard, Bath BA1 1LZ",
+            latitude = "51.3811",
+            longitude = "-2.3590",
+            workingHours = "09:00-18:00",
+            websiteUrl = "https://www.romanbaths.co.uk",
+            plannedVisitDateTime = "2026-08-05 15:30",
+            ticketPrices = "Mock: adult 26 GBP, child 18 GBP",
+            relatedObjectIds = familyAnd(bathHotelId)
+        )
+        val bathAbbeyId = addAttraction(
+            name = "Bath Abbey",
+            city = "Bath",
+            paid = false,
+            description = "Historic abbey and quiet rest stop",
+            address = "Bath BA1 1LT",
+            latitude = "51.3815",
+            longitude = "-2.3586",
+            workingHours = "10:00-17:30",
+            websiteUrl = "https://www.bathabbey.org",
+            plannedVisitDateTime = "2026-08-06 10:00",
+            relatedObjectIds = familyAnd(bathHotelId, bathBusId, romanBathsId)
+        )
+        val royalCrescentId = addAttraction(
+            name = "Royal Crescent",
+            city = "Bath",
+            paid = false,
+            description = "Georgian architecture photo walk",
+            address = "Royal Crescent, Bath BA1 2LR",
+            latitude = "51.3867",
+            longitude = "-2.3670",
+            workingHours = "Open area",
+            websiteUrl = "https://visitbath.co.uk",
+            plannedVisitDateTime = "2026-08-06 15:30",
+            relatedObjectIds = familyAnd(bathHotelId, bathBusId, bathAbbeyId)
+        )
+        addFoodPlace(
+            name = "Sally Lunn's Historic Eating House",
+            foodType = "Bakery",
+            address = "4 North Parade Passage, Bath BA1 1NX",
+            latitude = "51.3808",
+            longitude = "-2.3582",
+            websiteUrl = "https://www.sallylunns.co.uk",
+            phoneNumber = "+44 1225 461634",
+            emailAddress = "bath-buns@example.com",
+            workingHours = "10:00-21:00",
+            menuWithPrices = "Mock: Sally Lunn bun 8 GBP, cream tea 12 GBP, kids bun 5 GBP",
+            relatedObjectIds = familyAnd(bathHotelId, romanBathsId)
+        )
+        addFoodPlace(
+            name = "The Scallop Shell",
+            foodType = "Seafood",
+            address = "22 Monmouth Place, Bath BA1 2AY",
+            latitude = "51.3845",
+            longitude = "-2.3665",
+            websiteUrl = "https://www.thescallopshell.co.uk",
+            phoneNumber = "+44 1225 420928",
+            emailAddress = "fish@example.com",
+            workingHours = "12:00-22:00",
+            menuWithPrices = "Mock: fish and chips 17 GBP, grilled fish 22 GBP, kids chips 5 GBP",
+            relatedObjectIds = familyAnd(bathHotelId, royalCrescentId)
+        )
+
+        val trainToYorkId = addTransport(
+            name = "Train Bath Spa to York",
+            mode = "Train",
+            departureLocation = "Bath Spa Station",
+            departureLatitude = "51.3776",
+            departureLongitude = "-2.3570",
+            departureDateTime = "2026-08-07 08:45",
+            arrivalLocation = "York Station",
+            arrivalLatitude = "53.9579",
+            arrivalLongitude = "-1.0932",
+            arrivalDateTime = "2026-08-07 13:30",
+            price = "210 GBP total",
+            stopsLocations = "Bristol Temple Meads, Birmingham New Street",
+            routeMap = "https://maps.google.com/?q=Bath+Spa+to+York+Station",
+            relatedObjectIds = familyAnd(bathHotelId)
+        )
+        val yorkTaxiId = addTransport(
+            name = "Taxi York station to hotel",
+            mode = "Taxi",
+            departureLocation = "York Station",
+            departureLatitude = "53.9579",
+            departureLongitude = "-1.0932",
+            departureDateTime = "2026-08-07 13:45",
+            arrivalLocation = "Mock York Minster Hotel",
+            arrivalLatitude = "53.9623",
+            arrivalLongitude = "-1.0819",
+            arrivalDateTime = "2026-08-07 14:00",
+            price = "16 GBP",
+            stopsLocations = "Direct",
+            routeMap = "https://maps.google.com/?q=York+Station+to+York+Minster",
+            relatedObjectIds = familyAnd(trainToYorkId)
+        )
+        val yorkHotelId = addHotel(
+            name = "Mock York Minster Hotel",
+            address = "Duncombe Place, York YO1 7EF",
+            latitude = "53.9623",
+            longitude = "-1.0819",
+            websiteUrl = "https://example.com/york-minster-hotel",
+            phoneNumber = "+44 1904 000404",
+            emailAddress = "york@example.com",
+            checkIn = "2026-08-07 15:00",
+            checkOut = "2026-08-09 10:00",
+            isWithBreakfast = "Yes",
+            roomNumber = "Family room YRK-210",
+            relatedObjectIds = familyAnd(yorkTaxiId)
+        )
+        val yorkMinsterId = addAttraction(
+            name = "York Minster",
+            city = "York",
+            paid = true,
+            description = "Cathedral visit and tower option",
+            address = "Deangate, York YO1 7HH",
+            latitude = "53.9619",
+            longitude = "-1.0819",
+            workingHours = "09:30-16:00",
+            websiteUrl = "https://yorkminster.org",
+            plannedVisitDateTime = "2026-08-07 16:00",
+            ticketPrices = "Mock: adult 18 GBP, child 9 GBP",
+            relatedObjectIds = familyAnd(yorkHotelId)
+        )
+        val railMuseumId = addAttraction(
+            name = "National Railway Museum",
+            city = "York",
+            paid = false,
+            description = "Locomotives and engineering exhibits",
+            address = "Leeman Road, York YO26 4XJ",
+            latitude = "53.9609",
+            longitude = "-1.0975",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.railwaymuseum.org.uk",
+            plannedVisitDateTime = "2026-08-08 10:00",
+            relatedObjectIds = familyAnd(yorkHotelId, yorkMinsterId)
+        )
+        val wallsId = addAttraction(
+            name = "York City Walls",
+            city = "York",
+            paid = false,
+            description = "Family walk along the medieval walls",
+            address = "Bootham Bar, York YO1 7EW",
+            latitude = "53.9631",
+            longitude = "-1.0830",
+            workingHours = "08:00-dusk",
+            websiteUrl = "https://www.york.gov.uk",
+            plannedVisitDateTime = "2026-08-08 15:30",
+            relatedObjectIds = familyAnd(yorkHotelId, railMuseumId)
+        )
+        addFoodPlace(
+            name = "Bettys Cafe Tea Rooms York",
+            foodType = "Tea room",
+            address = "6-8 St Helen's Square, York YO1 8QP",
+            latitude = "53.9599",
+            longitude = "-1.0840",
+            websiteUrl = "https://www.bettys.co.uk",
+            phoneNumber = "+44 1904 659142",
+            emailAddress = "tea@example.com",
+            workingHours = "09:00-21:00",
+            menuWithPrices = "Mock: afternoon tea 29 GBP, cake 6 GBP, kids sandwich 7 GBP",
+            relatedObjectIds = familyAnd(yorkHotelId, yorkMinsterId)
+        )
+        addFoodPlace(
+            name = "Shambles Market Food Court",
+            foodType = "Market food",
+            address = "5 Silver Street, York YO1 8RY",
+            latitude = "53.9601",
+            longitude = "-1.0810",
+            websiteUrl = "https://www.shamblesmarket.com",
+            phoneNumber = "+44 1904 000505",
+            emailAddress = "market@example.com",
+            workingHours = "10:00-16:00",
+            menuWithPrices = "Mock: bao 8 GBP, burger 10 GBP, churros 5 GBP",
+            relatedObjectIds = familyAnd(yorkHotelId, wallsId)
+        )
+
+        val trainToManchesterId = addTransport(
+            name = "Train York to Manchester",
+            mode = "Train",
+            departureLocation = "York Station",
+            departureLatitude = "53.9579",
+            departureLongitude = "-1.0932",
+            departureDateTime = "2026-08-09 09:10",
+            arrivalLocation = "Manchester Piccadilly Station",
+            arrivalLatitude = "53.4774",
+            arrivalLongitude = "-2.2309",
+            arrivalDateTime = "2026-08-09 10:45",
+            price = "88 GBP total",
+            stopsLocations = "Leeds",
+            routeMap = "https://maps.google.com/?q=York+to+Manchester+Piccadilly",
+            relatedObjectIds = familyAnd(yorkHotelId)
+        )
+        val manchesterHotelId = addHotel(
+            name = "Mock Manchester Piccadilly Hotel",
+            address = "London Road, Manchester M1 2PG",
+            latitude = "53.4776",
+            longitude = "-2.2310",
+            websiteUrl = "https://example.com/manchester-piccadilly",
+            phoneNumber = "+44 161 000 0606",
+            emailAddress = "manchester@example.com",
+            checkIn = "2026-08-09 15:00",
+            checkOut = "2026-08-10 09:30",
+            isWithBreakfast = "Yes",
+            roomNumber = "Family room MAN-090",
+            relatedObjectIds = familyAnd(trainToManchesterId)
+        )
+        val tramId = addTransport(
+            name = "Manchester Metrolink city route",
+            mode = "Tram",
+            departureLocation = "Piccadilly Metrolink",
+            departureLatitude = "53.4776",
+            departureLongitude = "-2.2310",
+            departureDateTime = "2026-08-09 13:30",
+            arrivalLocation = "Etihad Campus",
+            arrivalLatitude = "53.4831",
+            arrivalLongitude = "-2.2004",
+            arrivalDateTime = "2026-08-09 13:55",
+            price = "14 GBP family day ticket",
+            stopsLocations = "Piccadilly Gardens, New Islington, Etihad Campus",
+            routeMap = "https://maps.google.com/?q=Manchester+Metrolink+Piccadilly+to+Etihad+Campus",
+            relatedObjectIds = familyAnd(manchesterHotelId)
+        )
+        val scienceMuseumId = addAttraction(
+            name = "Science and Industry Museum",
+            city = "Manchester",
+            paid = false,
+            description = "Science, transport, and industrial history visit",
+            address = "Liverpool Road, Manchester M3 4FP",
+            latitude = "53.4767",
+            longitude = "-2.2546",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.scienceandindustrymuseum.org.uk",
+            plannedVisitDateTime = "2026-08-09 11:30",
+            relatedObjectIds = familyAnd(manchesterHotelId)
+        )
+        val etihadTourId = addAttraction(
+            name = "Etihad Stadium Tour",
+            city = "Manchester",
+            paid = true,
+            description = "Football stadium tour",
+            address = "Etihad Stadium, Ashton New Road, Manchester M11 3FF",
+            latitude = "53.4831",
+            longitude = "-2.2004",
+            workingHours = "10:00-16:00",
+            websiteUrl = "https://www.mancity.com/tours",
+            plannedVisitDateTime = "2026-08-09 14:30",
+            ticketPrices = "Mock: adult 28 GBP, child 18 GBP",
+            relatedObjectIds = familyAnd(manchesterHotelId, tramId, scienceMuseumId)
+        )
+        val libraryId = addAttraction(
+            name = "John Rylands Library",
+            city = "Manchester",
+            paid = false,
+            description = "Historic library and architecture stop",
+            address = "150 Deansgate, Manchester M3 3EH",
+            latitude = "53.4808",
+            longitude = "-2.2487",
+            workingHours = "10:00-17:00",
+            websiteUrl = "https://www.library.manchester.ac.uk/rylands",
+            plannedVisitDateTime = "2026-08-10 10:00",
+            relatedObjectIds = familyAnd(manchesterHotelId, etihadTourId)
+        )
+        addFoodPlace(
+            name = "Mackie Mayor",
+            foodType = "Food hall",
+            address = "1 Eagle Street, Manchester M4 5BU",
+            latitude = "53.4854",
+            longitude = "-2.2346",
+            websiteUrl = "https://www.mackiemayor.co.uk",
+            phoneNumber = "+44 161 000 0707",
+            emailAddress = "foodhall@example.com",
+            workingHours = "09:00-22:00",
+            menuWithPrices = "Mock: tacos 9 GBP, steak sandwich 13 GBP, juice 4 GBP",
+            relatedObjectIds = familyAnd(manchesterHotelId, scienceMuseumId)
+        )
+        addFoodPlace(
+            name = "Rudy's Pizza Manchester",
+            foodType = "Pizza",
+            address = "9 Cotton Street, Manchester M4 5BF",
+            latitude = "53.4842",
+            longitude = "-2.2362",
+            websiteUrl = "https://www.rudyspizza.co.uk",
+            phoneNumber = "+44 161 000 0808",
+            emailAddress = "pizza@example.com",
+            workingHours = "12:00-22:00",
+            menuWithPrices = "Mock: margherita 9 GBP, salami pizza 12 GBP, salad 6 GBP",
+            relatedObjectIds = familyAnd(manchesterHotelId, libraryId)
+        )
+        addTransport(
+            name = "Flight Manchester to Ben Gurion",
+            mode = "Commercial plane",
+            departureLocation = "Manchester Airport",
+            departureLatitude = "53.3650",
+            departureLongitude = "-2.2720",
+            departureDateTime = "2026-08-10 18:20",
+            arrivalLocation = "Ben Gurion Airport, Israel",
+            arrivalLatitude = "32.0055",
+            arrivalLongitude = "34.8854",
+            arrivalDateTime = "2026-08-11 01:20",
+            price = "1760 GBP total",
+            stopsLocations = "Direct flight",
+            routeMap = "https://maps.google.com/?q=MAN+to+TLV",
+            relatedObjectIds = familyAnd(manchesterHotelId, libraryId)
+        )
+
+        return objects
     }
 
     private fun exportTables(db: SupportSQLiteDatabase): JSONObject {
@@ -511,6 +1145,13 @@ class TripBackupRepository(
             .ifBlank { "export" }
     }
 
+    private fun String.safeUrlQuery(): String {
+        return trim()
+            .replace(Regex("\\s+"), "+")
+            .replace(Regex("[^A-Za-z0-9+.-]+"), "")
+            .ifBlank { "Trip+Planner" }
+    }
+
     private fun timestamp(): String {
         return SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
     }
@@ -523,8 +1164,6 @@ class TripBackupRepository(
         const val BLOB_KEY = "__base64Blob"
         const val MOCK_SEED_PREFERENCES_NAME = "trip-planner-mock-seed"
         const val MOCK_SEED_CLEARED_KEY = "mockSeedCleared"
-        const val MOCK_FAMILY_MEMBER_NAME = "Sarah M."
-        const val MOCK_AIRPORT_NAME = "Ben Gurion Airport"
 
         val WHOLE_DATABASE_TABLES = listOf(
             "trips",
