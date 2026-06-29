@@ -36,11 +36,22 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$escapedMapsApiKey\"")
         buildConfigField("String", "PLACES_API_KEY", "\"$escapedPlacesApiKey\"")
+        buildConfigField("boolean", "PREPOPULATE_MOCK_DB", "false")
     }
 
     buildFeatures {
         buildConfig = true
         compose = true
+    }
+
+    buildTypes {
+        create("mock") {
+            initWith(getByName("debug"))
+            matchingFallbacks += listOf("debug")
+            applicationIdSuffix = ".mock"
+            versionNameSuffix = "-mock"
+            buildConfigField("boolean", "PREPOPULATE_MOCK_DB", "true")
+        }
     }
 
     compileOptions {

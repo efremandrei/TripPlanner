@@ -21,6 +21,9 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE id = :tripId")
     suspend fun getTrip(tripId: Long): TripEntity?
 
+    @Query("SELECT COUNT(*) FROM trips")
+    suspend fun countTrips(): Int
+
     @Transaction
     @Query("SELECT * FROM trips WHERE id = :tripId")
     suspend fun getTripWithObjects(tripId: Long): TripWithObjects?

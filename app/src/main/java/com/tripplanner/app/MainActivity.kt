@@ -134,6 +134,13 @@ private fun TripPlannerApp() {
     val context = LocalContext.current
     val activity = context as? Activity
     val authRepository = remember(context) { AuthRepository(context.applicationContext) }
+    val database = (context.applicationContext as TripPlannerApplication).database
+    val startupBackupRepository = remember(database) {
+        TripBackupRepository(
+            context = context.applicationContext,
+            database = database
+        )
+    }
     var authSession by remember { mutableStateOf(authRepository.currentSession()) }
 
     fun returnToMainPage() {
@@ -152,6 +159,14 @@ private fun TripPlannerApp() {
             showExitConfirmation = true
         } else {
             returnToMainPage()
+        }
+    }
+
+    LaunchedEffect(startupBackupRepository) {
+        if (BuildConfig.PREPOPULATE_MOCK_DB) {
+            runCatching {
+                startupBackupRepository.populateMockDatabaseIfEmpty()
+            }
         }
     }
 

@@ -33,6 +33,14 @@ class TripBackupRepository(
         EXPORT_DIRECTORY_NAME
     ).apply { mkdirs() }
 
+    suspend fun populateMockDatabaseIfEmpty(): BackupOperationResult {
+        val tripCount = database.tripDao().countTrips()
+        if (tripCount > 0) {
+            return BackupOperationResult("Mock DB seed skipped: $tripCount trips already exist")
+        }
+        return populateMockDatabase()
+    }
+
     suspend fun populateMockDatabase(): BackupOperationResult {
         val firstTripId = seedTokyoTrip()
         val sharedFamilyMember = database.poolItemDao()
