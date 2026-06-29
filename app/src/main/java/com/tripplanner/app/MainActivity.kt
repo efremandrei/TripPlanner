@@ -83,6 +83,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.tripplanner.app.data.auth.AuthRepository
 import com.tripplanner.app.data.auth.AuthProvider
 import com.tripplanner.app.data.auth.AuthSession
+import com.tripplanner.app.data.backup.TripBackupRepository
 import com.tripplanner.app.data.google.GooglePlaceDetails
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
@@ -263,6 +264,17 @@ private fun MainMenuScreen(
     onManageTrips: () -> Unit,
     onUseExistingTrip: () -> Unit
 ) {
+    val context = LocalContext.current
+    val database = (context.applicationContext as TripPlannerApplication).database
+    val backupRepository = remember(database) {
+        TripBackupRepository(
+            context = context.applicationContext,
+            database = database
+        )
+    }
+    val coroutineScope = rememberCoroutineScope()
+    var databaseStatus by rememberSaveable { mutableStateOf<String?>(null) }
+
     Scaffold { innerPadding ->
         Column(
             modifier = Modifier
@@ -302,6 +314,40 @@ private fun MainMenuScreen(
                 subtitle = "Open a saved plan for itinerary, bookings, and maps",
                 accent = Color(0xFF4F7CAC),
                 onClick = onUseExistingTrip
+            )
+            DatabaseToolsPanel(
+                status = databaseStatus,
+                exportDirectory = backupRepository.exportDirectoryPath(),
+                onPopulateMockDb = {
+                    coroutineScope.launch {
+                        databaseStatus = "Populating mock database"
+                        databaseStatus = runCatching {
+                            backupRepository.populateMockDatabase().message
+                        }.getOrElse { error ->
+                            error.message ?: "Mock database could not be populated"
+                        }
+                    }
+                },
+                onExportWholeDb = {
+                    coroutineScope.launch {
+                        databaseStatus = "Exporting whole database"
+                        databaseStatus = runCatching {
+                            backupRepository.exportWholeDatabase().message
+                        }.getOrElse { error ->
+                            error.message ?: "Whole database could not be exported"
+                        }
+                    }
+                },
+                onImportWholeDb = {
+                    coroutineScope.launch {
+                        databaseStatus = "Importing latest whole database export"
+                        databaseStatus = runCatching {
+                            backupRepository.importLatestWholeDatabase().message
+                        }.getOrElse { error ->
+                            error.message ?: "Whole database could not be imported"
+                        }
+                    }
+                }
             )
         }
     }
@@ -446,6 +492,72 @@ private fun AuthScreen(
     }
 }
 
+@Composable
+private fun DatabaseToolsPanel(
+    status: String?,
+    exportDirectory: String,
+    onPopulateMockDb: () -> Unit,
+    onExportWholeDb: () -> Unit,
+    onImportWholeDb: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Database tools",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Button(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                onClick = onPopulateMockDb,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Populate mock DB")
+            }
+            OutlinedButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                onClick = onExportWholeDb,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Export whole DB")
+            }
+            OutlinedButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                onClick = onImportWholeDb,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Import latest whole DB")
+            }
+            Text(
+                text = "Files: $exportDirectory",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            status?.let { currentStatus ->
+                Text(
+                    text = currentStatus,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TripManagementScreen(
@@ -460,6 +572,14 @@ private fun TripManagementScreen(
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
     val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
+    val backupRepository = remember(database) {
+        TripBackupRepository(
+            context = context.applicationContext,
+            database = database
+        )
+    }
+    val coroutineScope = rememberCoroutineScope()
+    var tripBackupStatus by rememberSaveable { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -499,6 +619,31 @@ private fun TripManagementScreen(
                 accent = MaterialTheme.colorScheme.primary,
                 onClick = onNewTrip
             )
+            OutlinedButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                onClick = {
+                    coroutineScope.launch {
+                        tripBackupStatus = "Importing latest trip export"
+                        tripBackupStatus = runCatching {
+                            backupRepository.importLatestTripExport().message
+                        }.getOrElse { error ->
+                            error.message ?: "Trip export could not be imported"
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Import latest trip export")
+            }
+            tripBackupStatus?.let { status ->
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Text(
                 text = "Existing trips",
                 style = MaterialTheme.typography.titleLarge,
@@ -511,8 +656,19 @@ private fun TripManagementScreen(
                     SavedTripCard(
                         trip = trip,
                         actionLabel = "Edit",
+                        secondaryActionLabel = "Export",
                         accent = MaterialTheme.colorScheme.primary,
-                        onClick = { onEditTrip(trip.id) }
+                        onClick = { onEditTrip(trip.id) },
+                        onSecondaryClick = {
+                            coroutineScope.launch {
+                                tripBackupStatus = "Exporting ${trip.title}"
+                                tripBackupStatus = runCatching {
+                                    backupRepository.exportTrip(trip.id).message
+                                }.getOrElse { error ->
+                                    error.message ?: "Trip could not be exported"
+                                }
+                            }
+                        }
                     )
                 }
             }
@@ -655,22 +811,24 @@ private fun UseExistingTripScreen(
 private fun SavedTripCard(
     trip: TripEntity,
     actionLabel: String,
+    secondaryActionLabel: String? = null,
     accent: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onSecondaryClick: (() -> Unit)? = null
 ) {
-    Button(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(82.dp),
-        onClick = onClick,
+    Card(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = ButtonDefaults.buttonColors(
+        colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -703,12 +861,26 @@ private fun SavedTripCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                text = actionLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = accent,
-                fontWeight = FontWeight.Bold
-            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Button(
+                    onClick = onClick,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent)
+                ) {
+                    Text(actionLabel)
+                }
+                if (secondaryActionLabel != null && onSecondaryClick != null) {
+                    OutlinedButton(
+                        onClick = onSecondaryClick,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(secondaryActionLabel)
+                    }
+                }
+            }
         }
     }
 }

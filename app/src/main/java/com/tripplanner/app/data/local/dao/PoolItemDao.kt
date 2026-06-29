@@ -11,6 +11,7 @@ import com.tripplanner.app.data.local.entity.PoolItemEntity
 import com.tripplanner.app.data.local.entity.PoolItemRelationEntity
 import com.tripplanner.app.data.local.entity.PoolMembershipEntity
 import com.tripplanner.app.data.local.model.PoolItemWithDetails
+import com.tripplanner.app.model.TripObjectType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -26,6 +27,23 @@ interface PoolItemDao {
         """
     )
     fun observeGeneralPoolItems(): Flow<List<PoolItemEntity>>
+
+    @Query(
+        """
+        SELECT pool_items.*
+        FROM pool_items
+        INNER JOIN pool_memberships ON pool_memberships.item_id = pool_items.id
+        INNER JOIN item_pools ON item_pools.id = pool_memberships.pool_id
+        WHERE item_pools.type = 'GENERAL'
+            AND pool_items.type = :type
+            AND pool_items.name = :name
+        LIMIT 1
+        """
+    )
+    suspend fun findGeneralPoolItem(
+        name: String,
+        type: TripObjectType
+    ): PoolItemEntity?
 
     @Query("SELECT * FROM pool_items WHERE id = :itemId")
     suspend fun getItem(itemId: Long): PoolItemEntity?
