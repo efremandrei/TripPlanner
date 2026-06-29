@@ -156,6 +156,7 @@ private fun TripPlannerApp() {
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
                     editingTripId = editingTripId,
+                    onTripSaved = { tripId -> editingTripId = tripId },
                     onBack = { screen = Screen.TripManagement }
                 )
             }
@@ -1047,6 +1048,7 @@ private fun PlanNewTripScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
     editingTripId: Long?,
+    onTripSaved: (Long) -> Unit,
     onBack: () -> Unit
 ) {
     var destination by rememberSaveable(editingTripId) { mutableStateOf("") }
@@ -1503,11 +1505,10 @@ private fun PlanNewTripScreen(
             )
             TripMapView(tripObjects = tripObjects)
             BookingsPanel(tripObjects = tripObjects)
-            OutlinedButton(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                onClick = {
+            PrivateMapPresetPanel(
+                tripObjects = tripObjects,
+                isSavedTrip = editingTripId != null,
+                onOpenGoogleMaps = {
                     val mapIntent = GoogleMapsIntents.openMapIntent(tripObjects)
                     if (mapIntent == null) {
                         saveStatus = "Add coordinates before opening Google Maps"
@@ -1518,12 +1519,8 @@ private fun PlanNewTripScreen(
                             saveStatus = "Google Maps app is not available"
                         }
                     }
-                },
-                enabled = tripObjects.isNotEmpty(),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Open map in Google Maps")
-            }
+                }
+            )
             Button(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1548,6 +1545,7 @@ private fun PlanNewTripScreen(
                                 )
                             }
                         }.onSuccess { result ->
+                            onTripSaved(result.tripId)
                             tripRepository.getEditableTrip(result.tripId)?.let { editableTrip ->
                                 destination = editableTrip.trip.destination
                                 startDate = editableTrip.trip.startDate
@@ -1608,6 +1606,97 @@ private fun tripDateRange(trip: TripEntity): String {
 }
 
 @Composable
+private fun PrivateMapPresetPanel(
+    tripObjects: List<TripObjectDraft>,
+    isSavedTrip: Boolean,
+    onOpenGoogleMaps: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val mappedItemCount = tripObjects.count { it.hasMapPresetPoint() }
+    val status = when {
+        mappedItemCount == 0 -> "No map items"
+        isSavedTrip -> "$mappedItemCount stored"
+        else -> "$mappedItemCount ready"
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Private preset map",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Trip Planner",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        BookingSummaryRow(
+            label = "Local preset",
+            value = status,
+            accent = MaterialTheme.colorScheme.primary
+        )
+        BookingSummaryRow(
+            label = "Google Maps",
+            value = if (mappedItemCount == 0) "Not ready" else "Open online",
+            accent = Color(0xFF4F7CAC)
+        )
+        OutlinedButton(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            onClick = onOpenGoogleMaps,
+            enabled = mappedItemCount > 0,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("Open in Google Maps")
+        }
+    }
+}
+
+private fun TripObjectDraft.hasMapPresetPoint(): Boolean {
+    fun hasCoordinates(
+        latitudeAttribute: TripObjectAttribute,
+        longitudeAttribute: TripObjectAttribute
+    ): Boolean {
+        val latitude = attributes[latitudeAttribute]?.toDoubleOrNull()
+        val longitude = attributes[longitudeAttribute]?.toDoubleOrNull()
+        return latitude != null &&
+            longitude != null &&
+            latitude in -90.0..90.0 &&
+            longitude in -180.0..180.0
+    }
+
+    if (type == TripObjectType.TRANSPORTATION) {
+        return hasCoordinates(
+            latitudeAttribute = TripObjectAttribute.DEPARTURE_LATITUDE,
+            longitudeAttribute = TripObjectAttribute.DEPARTURE_LONGITUDE
+        ) || hasCoordinates(
+            latitudeAttribute = TripObjectAttribute.ARRIVAL_LATITUDE,
+            longitudeAttribute = TripObjectAttribute.ARRIVAL_LONGITUDE
+        )
+    }
+
+    return hasCoordinates(
+        latitudeAttribute = TripObjectAttribute.LATITUDE,
+        longitudeAttribute = TripObjectAttribute.LONGITUDE
+    )
+}
+
+@Composable
 private fun BookingsPanel(
     tripObjects: List<TripObjectDraft>,
     modifier: Modifier = Modifier
@@ -1637,7 +1726,7 @@ private fun BookingsPanel(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Private preset map",
+                text = "Local itinerary",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
@@ -2142,6 +2231,7 @@ private fun PlanNewTripPreview() {
             appSkin = AppSkin.System,
             onAppSkinChange = {},
             editingTripId = null,
+            onTripSaved = {},
             onBack = {}
         )
     }
