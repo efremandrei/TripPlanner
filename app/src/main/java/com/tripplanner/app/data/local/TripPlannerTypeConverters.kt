@@ -1,6 +1,7 @@
 package com.tripplanner.app.data.local
 
 import androidx.room.TypeConverter
+import com.tripplanner.app.data.local.entity.ItemPoolType
 import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectType
 
@@ -16,4 +17,10 @@ class TripPlannerTypeConverters {
 
     @TypeConverter
     fun stringToAttribute(value: String): TripObjectAttribute = TripObjectAttribute.valueOf(value)
+
+    @TypeConverter
+    fun itemPoolTypeToString(value: ItemPoolType): String = value.name
+
+    @TypeConverter
+    fun stringToItemPoolType(value: String): ItemPoolType = ItemPoolType.valueOf(value)
 }

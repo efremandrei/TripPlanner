@@ -80,6 +80,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.tripplanner.app.data.google.GooglePlaceDetails
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
+import com.tripplanner.app.data.local.entity.PoolItemEntity
 import com.tripplanner.app.data.local.entity.TripEntity
 import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectAttributeInputKind
@@ -425,6 +426,87 @@ private fun EmptyTripsCard(text: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun GeneralPoolPanel(
+    poolItems: List<PoolItemEntity>,
+    onUseItem: (PoolItemEntity) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "General pool",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            poolItems.forEach { poolItem ->
+                GeneralPoolItemRow(
+                    poolItem = poolItem,
+                    onUseItem = { onUseItem(poolItem) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GeneralPoolItemRow(
+    poolItem: PoolItemEntity,
+    onUseItem: () -> Unit
+) {
+    val accent = accentForTripObjectType(poolItem.type)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = poolItem.type.displayName.first().uppercase(),
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = poolItem.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = poolItem.type.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(onClick = onUseItem) {
+            Text("Use")
+        }
     }
 }
 
@@ -974,7 +1056,7 @@ private fun PlanNewTripScreen(
     var objectName by rememberSaveable(editingTripId) { mutableStateOf("") }
     var priorityOrder by rememberSaveable(editingTripId) { mutableStateOf("1") }
     var editingObjectId by rememberSaveable(editingTripId) { mutableStateOf<Long?>(null) }
-    var nextObjectId by rememberSaveable(editingTripId) { mutableLongStateOf(1L) }
+    var nextObjectId by rememberSaveable(editingTripId) { mutableLongStateOf(-1L) }
     var saveStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
     var googleFetchStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
     var isFetchingGoogleDetails by remember { mutableStateOf(false) }
@@ -984,6 +1066,7 @@ private fun PlanNewTripScreen(
     val tripObjects = remember(editingTripId) { mutableStateListOf<TripObjectDraft>() }
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
+    val generalPoolItems by database.poolItemDao().observeGeneralPoolItems().collectAsState(initial = emptyList())
     val tripRepository = remember(database) { TripRepository(database) }
     val googlePlacesRepository = remember(database) {
         GooglePlacesRepository(
@@ -1011,7 +1094,7 @@ private fun PlanNewTripScreen(
                 endDate = editableTrip.trip.endDate
                 tripObjects.clear()
                 tripObjects.addAll(editableTrip.objects)
-                nextObjectId = (editableTrip.objects.maxOfOrNull { it.id } ?: 0L) + 1L
+                nextObjectId = -1L
                 priorityOrder = (
                     (editableTrip.objects.maxOfOrNull { it.priorityOrder } ?: 0) + 1
                 ).toString()
@@ -1185,6 +1268,32 @@ private fun PlanNewTripScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
+            val tripObjectIds = tripObjects.map { it.id }.toSet()
+            val reusablePoolItems = generalPoolItems.filter { poolItem ->
+                poolItem.id !in tripObjectIds
+            }
+            if (reusablePoolItems.isNotEmpty()) {
+                GeneralPoolPanel(
+                    poolItems = reusablePoolItems,
+                    onUseItem = { poolItem ->
+                        coroutineScope.launch {
+                            val pooledDraft = tripRepository.getPoolItemDraft(poolItem.id)
+                                ?: return@launch
+                            val currentObjectIds = tripObjects.map { it.id }.toSet()
+                            upsertTripObject(
+                                tripObjects = tripObjects,
+                                savedObject = pooledDraft.copy(
+                                    priorityOrder = nextAvailablePriority(),
+                                    relatedObjectIds = pooledDraft.relatedObjectIds
+                                        .filter { it in currentObjectIds }
+                                        .toSet()
+                                )
+                            )
+                            saveStatus = "${poolItem.name} linked to this trip"
+                        }
+                    }
+                )
+            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -1333,7 +1442,7 @@ private fun PlanNewTripScreen(
                                 .weight(1f)
                                 .height(54.dp),
                             onClick = {
-                                val objectId = editingObjectId ?: nextObjectId++
+                                val objectId = editingObjectId ?: nextObjectId--
                                 val savedObject = TripObjectDraft(
                                     id = objectId,
                                     type = selectedObjectType,
@@ -1439,6 +1548,16 @@ private fun PlanNewTripScreen(
                                 )
                             }
                         }.onSuccess { result ->
+                            tripRepository.getEditableTrip(result.tripId)?.let { editableTrip ->
+                                destination = editableTrip.trip.destination
+                                startDate = editableTrip.trip.startDate
+                                endDate = editableTrip.trip.endDate
+                                tripObjects.clear()
+                                tripObjects.addAll(editableTrip.objects)
+                                nextObjectId = -1L
+                                priorityOrder = nextAvailablePriority().toString()
+                                resetObjectForm()
+                            }
                             saveStatus = buildString {
                                 append(
                                     if (editingTripId == null) {

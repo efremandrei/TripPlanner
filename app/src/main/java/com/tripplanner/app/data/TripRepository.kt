@@ -2,11 +2,17 @@ package com.tripplanner.app.data
 
 import androidx.room.withTransaction
 import com.tripplanner.app.data.local.TripPlannerDatabase
+import com.tripplanner.app.data.local.entity.ItemPoolEntity
+import com.tripplanner.app.data.local.entity.ItemPoolType
 import com.tripplanner.app.data.local.entity.MapPresetEntity
 import com.tripplanner.app.data.local.entity.MapPresetItemEntity
+import com.tripplanner.app.data.local.entity.PoolItemAttributeEntity
+import com.tripplanner.app.data.local.entity.PoolItemEntity
+import com.tripplanner.app.data.local.entity.PoolMembershipEntity
 import com.tripplanner.app.data.local.entity.TripEntity
 import com.tripplanner.app.data.local.entity.TripObjectAttributeEntity
 import com.tripplanner.app.data.local.entity.TripObjectEntity
+import com.tripplanner.app.data.local.model.PoolItemWithDetails
 import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectDraft
 
@@ -43,18 +49,22 @@ class TripRepository(
                 )
             )
 
-            val localToStoredObjectIds = insertTripObjects(
+            val tripPoolId = ensureTripPool(
                 tripId = tripId,
+                tripTitle = tripTitle,
+                timestampMillis = now
+            )
+            val localToPoolItemIds = saveTripPoolObjects(
+                tripPoolId = tripPoolId,
                 objects = objects,
                 timestampMillis = now
             )
-
-            val privateMapPresetId = createPrivateMapPreset(
+            val pooledObjects = objects.withPoolItemIds(localToPoolItemIds)
+            val privateMapPresetId = rebuildTripObjectMirrorAndMapPreset(
                 tripId = tripId,
                 tripTitle = tripTitle,
-                objects = objects,
-                localToStoredObjectIds = localToStoredObjectIds,
-                createdAtMillis = now
+                objects = pooledObjects,
+                timestampMillis = now
             )
 
             CreatedTripResult(
@@ -87,20 +97,22 @@ class TripRepository(
                 )
             )
 
-            database.mapPresetDao().deletePresetsForTrip(tripId)
-            database.tripObjectDao().deleteObjectsForTrip(tripId)
-
-            val localToStoredObjectIds = insertTripObjects(
+            val tripPoolId = ensureTripPool(
                 tripId = tripId,
+                tripTitle = tripTitle,
+                timestampMillis = now
+            )
+            val localToPoolItemIds = saveTripPoolObjects(
+                tripPoolId = tripPoolId,
                 objects = objects,
                 timestampMillis = now
             )
-            val privateMapPresetId = createPrivateMapPreset(
+            val pooledObjects = objects.withPoolItemIds(localToPoolItemIds)
+            val privateMapPresetId = rebuildTripObjectMirrorAndMapPreset(
                 tripId = tripId,
                 tripTitle = tripTitle,
-                objects = objects,
-                localToStoredObjectIds = localToStoredObjectIds,
-                createdAtMillis = now
+                objects = pooledObjects,
+                timestampMillis = now
             )
 
             CreatedTripResult(
@@ -112,26 +124,265 @@ class TripRepository(
 
     suspend fun getEditableTrip(tripId: Long): EditableTripDraft? {
         return database.withTransaction {
-            val tripWithObjects = database.tripDao().getTripWithObjects(tripId)
+            val trip = database.tripDao().getTrip(tripId)
                 ?: return@withTransaction null
-            EditableTripDraft(
-                trip = tripWithObjects.trip,
-                objects = tripWithObjects.objects.map { details ->
-                    TripObjectDraft(
-                        id = details.objectEntity.id,
-                        type = details.objectEntity.type,
-                        name = details.objectEntity.name,
-                        priorityOrder = details.objectEntity.priorityOrder,
-                        attributes = details.attributes.associate { attribute ->
-                            attribute.attribute to attribute.value
-                        },
-                        relatedObjectIds = details.relations
-                            .map { relation -> relation.relatedObjectId }
-                            .toSet()
+            val now = System.currentTimeMillis()
+            val tripPoolId = ensureTripPool(
+                tripId = tripId,
+                tripTitle = trip.title,
+                timestampMillis = now
+            )
+            val memberships = database.poolItemDao().getMembershipsForPool(tripPoolId)
+                .ifEmpty {
+                    bootstrapTripPoolFromLegacyObjects(
+                        trip = trip,
+                        tripPoolId = tripPoolId,
+                        timestampMillis = now
                     )
+                }
+
+            EditableTripDraft(
+                trip = trip,
+                objects = memberships.mapNotNull { membership ->
+                    database.poolItemDao().getItemWithDetails(membership.itemId)
+                        ?.toDraft(priorityOrder = membership.priorityOrder)
                 }
             )
         }
+    }
+
+    suspend fun getPoolItemDraft(itemId: Long): TripObjectDraft? {
+        return database.withTransaction {
+            database.poolItemDao().getItemWithDetails(itemId)
+                ?.toDraft(priorityOrder = 0)
+        }
+    }
+
+    private suspend fun ensureGeneralPool(timestampMillis: Long): Long {
+        database.itemPoolDao().getPoolWithoutTrip(ItemPoolType.GENERAL)?.let { return it.id }
+        return database.itemPoolDao().insertPool(
+            ItemPoolEntity(
+                name = "General",
+                type = ItemPoolType.GENERAL,
+                tripId = null,
+                isSystem = true,
+                createdAtMillis = timestampMillis,
+                updatedAtMillis = timestampMillis
+            )
+        )
+    }
+
+    private suspend fun ensureTripPool(
+        tripId: Long,
+        tripTitle: String,
+        timestampMillis: Long
+    ): Long {
+        database.itemPoolDao().getPoolForTrip(ItemPoolType.TRIP, tripId)?.let { return it.id }
+        return database.itemPoolDao().insertPool(
+            ItemPoolEntity(
+                name = "${tripTitle.ifBlank { "Untitled trip" }} trip pool",
+                type = ItemPoolType.TRIP,
+                tripId = tripId,
+                isSystem = false,
+                createdAtMillis = timestampMillis,
+                updatedAtMillis = timestampMillis
+            )
+        )
+    }
+
+    private suspend fun saveTripPoolObjects(
+        tripPoolId: Long,
+        objects: List<TripObjectDraft>,
+        timestampMillis: Long
+    ): Map<Long, Long> {
+        val generalPoolId = ensureGeneralPool(timestampMillis)
+        val localToPoolItemIds = LinkedHashMap<Long, Long>()
+
+        objects.sortedBy { it.priorityOrder }.forEach { draftObject ->
+            val poolItemId = upsertPoolItem(
+                draftObject = draftObject,
+                timestampMillis = timestampMillis
+            )
+            localToPoolItemIds[draftObject.id] = poolItemId
+            ensureGeneralMembership(
+                generalPoolId = generalPoolId,
+                itemId = poolItemId,
+                timestampMillis = timestampMillis
+            )
+        }
+
+        database.poolItemDao().deleteMembershipsForPool(tripPoolId)
+        database.poolItemDao().upsertMemberships(
+            objects.sortedBy { it.priorityOrder }.mapNotNull { draftObject ->
+                val poolItemId = localToPoolItemIds[draftObject.id] ?: return@mapNotNull null
+                PoolMembershipEntity(
+                    poolId = tripPoolId,
+                    itemId = poolItemId,
+                    priorityOrder = draftObject.priorityOrder,
+                    createdAtMillis = timestampMillis,
+                    updatedAtMillis = timestampMillis
+                )
+            }
+        )
+
+        objects.forEach { draftObject ->
+            val poolItemId = localToPoolItemIds[draftObject.id] ?: return@forEach
+            val relatedPoolItemIds = draftObject.relatedObjectIds
+                .mapNotNull { relatedObjectId ->
+                    localToPoolItemIds[relatedObjectId] ?: relatedObjectId.takeIf { it > 0 }
+                }
+                .filterNot { it == poolItemId }
+                .toSet()
+            database.poolItemDao().replaceItemRelations(
+                itemId = poolItemId,
+                relatedItemIds = relatedPoolItemIds
+            )
+        }
+
+        return localToPoolItemIds
+    }
+
+    private suspend fun upsertPoolItem(
+        draftObject: TripObjectDraft,
+        timestampMillis: Long
+    ): Long {
+        val existingItem = draftObject.id.takeIf { it > 0 }
+            ?.let { database.poolItemDao().getItem(it) }
+
+        val itemId = if (existingItem == null) {
+            database.poolItemDao().insertItem(
+                PoolItemEntity(
+                    type = draftObject.type,
+                    name = draftObject.name,
+                    createdAtMillis = timestampMillis,
+                    updatedAtMillis = timestampMillis
+                )
+            )
+        } else {
+            database.poolItemDao().updateItem(
+                existingItem.copy(
+                    type = draftObject.type,
+                    name = draftObject.name,
+                    updatedAtMillis = timestampMillis
+                )
+            )
+            existingItem.id
+        }
+
+        database.poolItemDao().replaceItemAttributes(
+            itemId = itemId,
+            attributes = draftObject.attributes.map { (attribute, value) ->
+                PoolItemAttributeEntity(
+                    itemId = itemId,
+                    attribute = attribute,
+                    value = value
+                )
+            }
+        )
+        return itemId
+    }
+
+    private suspend fun ensureGeneralMembership(
+        generalPoolId: Long,
+        itemId: Long,
+        timestampMillis: Long
+    ) {
+        if (database.poolItemDao().getMembership(generalPoolId, itemId) != null) return
+
+        database.poolItemDao().upsertMemberships(
+            listOf(
+                PoolMembershipEntity(
+                    poolId = generalPoolId,
+                    itemId = itemId,
+                    priorityOrder = database.poolItemDao().nextPriorityForPool(generalPoolId),
+                    createdAtMillis = timestampMillis,
+                    updatedAtMillis = timestampMillis
+                )
+            )
+        )
+    }
+
+    private suspend fun bootstrapTripPoolFromLegacyObjects(
+        trip: TripEntity,
+        tripPoolId: Long,
+        timestampMillis: Long
+    ): List<PoolMembershipEntity> {
+        val tripWithObjects = database.tripDao().getTripWithObjects(trip.id)
+            ?: return emptyList()
+        if (tripWithObjects.objects.isEmpty()) return emptyList()
+
+        val generalPoolId = ensureGeneralPool(timestampMillis)
+        val legacyToPoolItemIds = LinkedHashMap<Long, Long>()
+        val memberships = tripWithObjects.objects.map { legacyObject ->
+            val existingPoolItem = database.poolItemDao().getItem(legacyObject.objectEntity.id)
+            val poolItemId = existingPoolItem?.id ?: database.poolItemDao().insertItem(
+                PoolItemEntity(
+                    type = legacyObject.objectEntity.type,
+                    name = legacyObject.objectEntity.name,
+                    createdAtMillis = legacyObject.objectEntity.createdAtMillis,
+                    updatedAtMillis = legacyObject.objectEntity.updatedAtMillis
+                )
+            )
+            legacyToPoolItemIds[legacyObject.objectEntity.id] = poolItemId
+            database.poolItemDao().replaceItemAttributes(
+                itemId = poolItemId,
+                attributes = legacyObject.attributes.map { attribute ->
+                    PoolItemAttributeEntity(
+                        itemId = poolItemId,
+                        attribute = attribute.attribute,
+                        value = attribute.value
+                    )
+                }
+            )
+            ensureGeneralMembership(
+                generalPoolId = generalPoolId,
+                itemId = poolItemId,
+                timestampMillis = timestampMillis
+            )
+            PoolMembershipEntity(
+                poolId = tripPoolId,
+                itemId = poolItemId,
+                priorityOrder = legacyObject.objectEntity.priorityOrder,
+                createdAtMillis = legacyObject.objectEntity.createdAtMillis,
+                updatedAtMillis = legacyObject.objectEntity.updatedAtMillis
+            )
+        }
+
+        database.poolItemDao().upsertMemberships(memberships)
+        tripWithObjects.objects.forEach { legacyObject ->
+            val poolItemId = legacyToPoolItemIds[legacyObject.objectEntity.id] ?: return@forEach
+            val relatedPoolItemIds = legacyObject.relations
+                .mapNotNull { legacyToPoolItemIds[it.relatedObjectId] }
+                .filterNot { it == poolItemId }
+                .toSet()
+            database.poolItemDao().replaceItemRelations(
+                itemId = poolItemId,
+                relatedItemIds = relatedPoolItemIds
+            )
+        }
+        return database.poolItemDao().getMembershipsForPool(tripPoolId)
+    }
+
+    private suspend fun rebuildTripObjectMirrorAndMapPreset(
+        tripId: Long,
+        tripTitle: String,
+        objects: List<TripObjectDraft>,
+        timestampMillis: Long
+    ): Long? {
+        database.mapPresetDao().deletePresetsForTrip(tripId)
+        database.tripObjectDao().deleteObjectsForTrip(tripId)
+        val poolToTripObjectIds = insertTripObjects(
+            tripId = tripId,
+            objects = objects,
+            timestampMillis = timestampMillis
+        )
+        return createPrivateMapPreset(
+            tripId = tripId,
+            tripTitle = tripTitle,
+            objects = objects,
+            localToStoredObjectIds = poolToTripObjectIds,
+            createdAtMillis = timestampMillis
+        )
     }
 
     private suspend fun insertTripObjects(
@@ -209,6 +460,38 @@ class TripRepository(
             }
         )
         return presetId
+    }
+
+    private fun PoolItemWithDetails.toDraft(priorityOrder: Int): TripObjectDraft {
+        return TripObjectDraft(
+            id = item.id,
+            type = item.type,
+            name = item.name,
+            priorityOrder = priorityOrder,
+            attributes = attributes.associate { attribute ->
+                attribute.attribute to attribute.value
+            },
+            relatedObjectIds = relations.map { relation ->
+                relation.relatedItemId
+            }.toSet()
+        )
+    }
+
+    private fun List<TripObjectDraft>.withPoolItemIds(
+        localToPoolItemIds: Map<Long, Long>
+    ): List<TripObjectDraft> {
+        return map { draftObject ->
+            val poolItemId = localToPoolItemIds[draftObject.id] ?: draftObject.id
+            draftObject.copy(
+                id = poolItemId,
+                relatedObjectIds = draftObject.relatedObjectIds
+                    .mapNotNull { relatedObjectId ->
+                        localToPoolItemIds[relatedObjectId] ?: relatedObjectId.takeIf { it > 0 }
+                    }
+                    .filterNot { it == poolItemId }
+                    .toSet()
+            )
+        }
     }
 
     private fun TripObjectDraft.hasPresetMapDetails(): Boolean {
