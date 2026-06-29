@@ -3,6 +3,7 @@
 .kotlin/
 .agents/
 .codex/
+.codex-remote-attachments/
 build/
 local.properties
 *.iml

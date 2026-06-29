@@ -6,8 +6,11 @@ import android.os.Bundle
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,8 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -52,8 +58,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -127,38 +140,121 @@ private fun MainMenuScreen(
     onAppSkinChange: (AppSkin) -> Unit,
     onPlanNewTrip: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    Scaffold(
+        bottomBar = { BottomAppNavigation(activeItem = "Home") }
+    ) { innerPadding ->
         Column(
-            modifier = Modifier.widthIn(max = 420.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Trip Planner",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
+            AppHeaderBar()
+            TripHeroPanel(
+                title = "Trip Planner",
+                subtitle = "Build a clear itinerary, bookings list, and map plan",
+                status = "Local first"
             )
-            Spacer(modifier = Modifier.height(18.dp))
+            TripSummaryStrip(
+                firstTitle = "Offline",
+                firstSubtitle = "Room storage",
+                secondTitle = "Maps",
+                secondSubtitle = "When online",
+                status = "Ready"
+            )
             SkinSelector(
                 modifier = Modifier.fillMaxWidth(),
                 selectedSkin = appSkin,
                 onSkinSelected = onAppSkinChange
             )
-            Spacer(modifier = Modifier.height(36.dp))
-            PrimaryMenuButton(
-                label = "Plan a new trip",
+            Text(
+                text = "Plan your trip",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            HomeActionCard(
+                title = "Plan a new trip",
+                subtitle = "Create itinerary items, priorities, links, and map details",
+                accent = MaterialTheme.colorScheme.primary,
                 onClick = onPlanNewTrip
             )
-            Spacer(modifier = Modifier.height(14.dp))
-            SecondaryMenuButton(label = "Open existing trip")
-            Spacer(modifier = Modifier.height(14.dp))
-            SecondaryMenuButton(label = "Trips archive")
+            HomeActionCard(
+                title = "Open existing trip",
+                subtitle = "Coming next: continue a saved local trip",
+                accent = Color(0xFF4F7CAC),
+                enabled = false,
+                onClick = {}
+            )
+            HomeActionCard(
+                title = "Trips archive",
+                subtitle = "Coming next: browse archived plans",
+                accent = Color(0xFFFF8A3D),
+                enabled = false,
+                onClick = {}
+            )
+            DashboardPreviewPanel()
+        }
+    }
+}
+
+@Composable
+private fun HomeActionCard(
+    title: String,
+    subtitle: String,
+    accent: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Button(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(76.dp),
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = title.first().uppercase(),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -194,6 +290,443 @@ private fun SecondaryMenuButton(label: String) {
         )
     ) {
         Text(text = label, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+@Composable
+private fun AppHeaderBar(
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "TP",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Text(
+            modifier = Modifier.weight(1f),
+            text = "Trip Planner",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "1",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFE53935)
+            )
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE0C4B4)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "G",
+                    color = Color(0xFF4A2E24),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = "Guest",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun TripHeroPanel(
+    title: String,
+    subtitle: String,
+    status: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(196.dp)
+            .clip(RoundedCornerShape(8.dp))
+    ) {
+        TripHeroVisual(modifier = Modifier.fillMaxSize())
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0xAA06231F)
+                        )
+                    )
+                )
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFE6F4EF)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(14.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFD7FFE7))
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+        ) {
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF176B5B)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TripHeroVisual(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFFFFB07C),
+                    Color(0xFF86C7D4),
+                    Color(0xFF176B5B)
+                )
+            )
+        )
+        drawCircle(
+            color = Color(0xFFFFE6A3),
+            radius = size.minDimension * 0.11f,
+            center = Offset(size.width * 0.78f, size.height * 0.27f)
+        )
+
+        val hill = Path().apply {
+            moveTo(0f, size.height * 0.74f)
+            cubicTo(
+                size.width * 0.25f,
+                size.height * 0.58f,
+                size.width * 0.43f,
+                size.height * 0.78f,
+                size.width * 0.68f,
+                size.height * 0.61f
+            )
+            cubicTo(
+                size.width * 0.86f,
+                size.height * 0.49f,
+                size.width,
+                size.height * 0.66f,
+                size.width,
+                size.height * 0.66f
+            )
+            lineTo(size.width, size.height)
+            lineTo(0f, size.height)
+            close()
+        }
+        drawPath(path = hill, color = Color(0xFF0E4F43))
+
+        val templeRoof = Path().apply {
+            moveTo(size.width * 0.13f, size.height * 0.59f)
+            lineTo(size.width * 0.35f, size.height * 0.38f)
+            lineTo(size.width * 0.58f, size.height * 0.59f)
+            lineTo(size.width * 0.52f, size.height * 0.63f)
+            lineTo(size.width * 0.35f, size.height * 0.49f)
+            lineTo(size.width * 0.19f, size.height * 0.63f)
+            close()
+        }
+        drawPath(path = templeRoof, color = Color(0xFFE36D3C))
+        drawRect(
+            color = Color(0xFFFFD092),
+            topLeft = Offset(size.width * 0.24f, size.height * 0.62f),
+            size = Size(size.width * 0.22f, size.height * 0.16f)
+        )
+        drawLine(
+            color = Color(0xFF4F7CAC),
+            start = Offset(size.width * 0.12f, size.height * 0.84f),
+            end = Offset(size.width * 0.88f, size.height * 0.54f),
+            strokeWidth = 7f,
+            cap = StrokeCap.Round
+        )
+        listOf(
+            Offset(size.width * 0.20f, size.height * 0.81f),
+            Offset(size.width * 0.53f, size.height * 0.68f),
+            Offset(size.width * 0.82f, size.height * 0.56f)
+        ).forEachIndexed { index, offset ->
+            drawCircle(
+                color = if (index == 1) Color(0xFFFF8A3D) else Color(0xFF00A6A6),
+                radius = 11f,
+                center = offset
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 4f,
+                center = offset
+            )
+        }
+    }
+}
+
+@Composable
+private fun TripSummaryStrip(
+    firstTitle: String,
+    firstSubtitle: String,
+    secondTitle: String,
+    secondSubtitle: String,
+    status: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SummaryMetric(
+                modifier = Modifier.weight(1f),
+                title = firstTitle,
+                subtitle = firstSubtitle
+            )
+            SummaryMetric(
+                modifier = Modifier.weight(1f),
+                title = secondTitle,
+                subtitle = secondSubtitle
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFD7FFE7))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFF176B5B),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryMetric(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun DashboardPreviewPanel() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Your itinerary",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        PreviewTimelineItem(
+            time = "09:00",
+            title = "Hotel check-in",
+            tag = "Hotel",
+            accent = MaterialTheme.colorScheme.primary
+        )
+        PreviewTimelineItem(
+            time = "13:00",
+            title = "Lunch near the old town",
+            tag = "Food",
+            accent = Color(0xFFFF8A3D)
+        )
+        PreviewTimelineItem(
+            time = "17:30",
+            title = "Sunset attraction",
+            tag = "Activity",
+            accent = Color(0xFF6C63FF)
+        )
+    }
+}
+
+@Composable
+private fun PreviewTimelineItem(
+    time: String,
+    title: String,
+    tag: String,
+    accent: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            modifier = Modifier.width(48.dp),
+            text = time,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = tag.first().uppercase(),
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = tag,
+                style = MaterialTheme.typography.labelSmall,
+                color = accent
+            )
+        }
+    }
+}
+
+@Composable
+private fun BottomAppNavigation(
+    activeItem: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf("Home", "My Trips", "Explore", "Community", "Profile").forEach { item ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (item == activeItem) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)
+                                } else {
+                                    Color.Transparent
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = item.first().uppercase(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (item == activeItem) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                    Text(
+                        text = item,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (item == activeItem) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -299,7 +832,7 @@ private fun PlanNewTripScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Plan a new trip") },
+                title = { Text("Trip Planner") },
                 navigationIcon = {
                     TextButton(onClick = onBack) {
                         Text("Back")
@@ -309,7 +842,8 @@ private fun PlanNewTripScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
-        }
+        },
+        bottomBar = { BottomAppNavigation(activeItem = "My Trips") }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -319,6 +853,18 @@ private fun PlanNewTripScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            TripHeroPanel(
+                title = destination.ifBlank { "New trip adventure" },
+                subtitle = tripDateSubtitle(startDate = startDate, endDate = endDate),
+                status = if (tripObjects.isEmpty()) "Draft" else "Planned"
+            )
+            TripSummaryStrip(
+                firstTitle = "${tripObjects.size} Items",
+                firstSubtitle = "In this itinerary",
+                secondTitle = "${tripObjects.count { it.type == TripObjectType.FAMILY_MEMBER }} Travellers",
+                secondSubtitle = "Family members",
+                status = if (tripObjects.any { it.type == TripObjectType.HOTEL }) "Booked" else "Planning"
+            )
             Text(
                 text = "Trip basics",
                 style = MaterialTheme.typography.headlineSmall,
@@ -575,11 +1121,12 @@ private fun PlanNewTripScreen(
                 }
             }
             Text(
-                text = "Trip map",
+                text = "Map and bookings",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
             TripMapView(tripObjects = tripObjects)
+            BookingsPanel(tripObjects = tripObjects)
             OutlinedButton(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -634,6 +1181,112 @@ private fun PlanNewTripScreen(
                 )
             }
         }
+    }
+}
+
+private fun tripDateSubtitle(
+    startDate: String,
+    endDate: String
+): String {
+    val start = startDate.ifBlank { "Start date" }
+    val end = endDate.ifBlank { "End date" }
+    return "$start - $end"
+}
+
+@Composable
+private fun BookingsPanel(
+    tripObjects: List<TripObjectDraft>,
+    modifier: Modifier = Modifier
+) {
+    val transportCount = tripObjects.count { it.type == TripObjectType.TRANSPORTATION }
+    val hotelCount = tripObjects.count { it.type == TripObjectType.HOTEL }
+    val activityCount = tripObjects.count {
+        it.type == TripObjectType.PAID_ATTRACTION || it.type == TripObjectType.FREE_ATTRACTION
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Bookings",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Private preset map",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        BookingSummaryRow(
+            label = "Transportation",
+            value = if (transportCount == 0) "No legs yet" else "$transportCount planned",
+            accent = Color(0xFF4F7CAC)
+        )
+        BookingSummaryRow(
+            label = "Hotels",
+            value = if (hotelCount == 0) "No hotels yet" else "$hotelCount planned",
+            accent = MaterialTheme.colorScheme.primary
+        )
+        BookingSummaryRow(
+            label = "Activities",
+            value = if (activityCount == 0) "No attractions yet" else "$activityCount planned",
+            accent = Color(0xFFFF8A3D)
+        )
+    }
+}
+
+@Composable
+private fun BookingSummaryRow(
+    label: String,
+    value: String,
+    accent: Color
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label.first().uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+        Text(
+            modifier = Modifier.weight(1f),
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -782,34 +1435,65 @@ private fun TripObjectRow(
     relatedObjects: List<TripObjectDraft>,
     onEdit: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+    val accent = accentForTripObjectType(tripObject.type)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.width(44.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "#${tripObject.priorityOrder}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = tripObject.type.displayName.first().uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = "${tripObject.priorityOrder}. ${tripObject.type.displayName}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
                         text = tripObject.name,
                         style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = tripObject.type.displayName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = accent,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -818,26 +1502,150 @@ private fun TripObjectRow(
                 }
             }
             if (tripObject.attributes.isNotEmpty()) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    tripObject.attributes.forEach { (attribute, value) ->
-                        Text(
-                            text = "${attribute.displayName}: $value",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    tripObject.attributes.entries.take(4).forEach { (attribute, value) ->
+                        AttributeTag(label = attribute.displayName, value = value)
                     }
                 }
             }
             if (relatedObjects.isNotEmpty()) {
                 Text(
                     text = "Related: ${relatedObjects.joinToString { "${it.priorityOrder}. ${it.name}" }}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
+        ObjectThumbnail(
+            type = tripObject.type,
+            accent = accent,
+            modifier = Modifier.size(58.dp)
+        )
+    }
+}
+
+@Composable
+private fun AttributeTag(
+    label: String,
+    value: String
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "$label: $value",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ObjectThumbnail(
+    type: TripObjectType,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .aspectRatio(1f)
+    ) {
+        drawCircle(
+            color = accent.copy(alpha = 0.18f),
+            radius = size.minDimension * 0.42f,
+            center = Offset(size.width * 0.50f, size.height * 0.50f)
+        )
+        when (type) {
+            TripObjectType.TRANSPORTATION -> {
+                drawLine(
+                    color = accent,
+                    start = Offset(size.width * 0.22f, size.height * 0.70f),
+                    end = Offset(size.width * 0.76f, size.height * 0.32f),
+                    strokeWidth = 5f,
+                    cap = StrokeCap.Round
+                )
+                drawCircle(color = accent, radius = 6f, center = Offset(size.width * 0.22f, size.height * 0.70f))
+                drawCircle(color = accent, radius = 6f, center = Offset(size.width * 0.76f, size.height * 0.32f))
+            }
+            TripObjectType.HOTEL -> {
+                drawRect(
+                    color = accent,
+                    topLeft = Offset(size.width * 0.24f, size.height * 0.26f),
+                    size = Size(size.width * 0.52f, size.height * 0.48f)
+                )
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(size.width * 0.34f, size.height * 0.40f),
+                    size = Size(size.width * 0.12f, size.height * 0.12f)
+                )
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(size.width * 0.54f, size.height * 0.40f),
+                    size = Size(size.width * 0.12f, size.height * 0.12f)
+                )
+            }
+            TripObjectType.FOOD_PLACE -> {
+                drawCircle(color = accent, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.5f, size.height * 0.52f))
+                drawCircle(color = Color.White, radius = size.minDimension * 0.14f, center = Offset(size.width * 0.5f, size.height * 0.52f))
+            }
+            TripObjectType.FAMILY_MEMBER -> {
+                drawCircle(color = accent, radius = size.minDimension * 0.16f, center = Offset(size.width * 0.5f, size.height * 0.34f))
+                drawArc(
+                    color = accent,
+                    startAngle = 205f,
+                    sweepAngle = 130f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.25f, size.height * 0.46f),
+                    size = Size(size.width * 0.50f, size.height * 0.42f),
+                    style = Stroke(width = 6f, cap = StrokeCap.Round)
+                )
+            }
+            else -> {
+                val pin = Path().apply {
+                    moveTo(size.width * 0.50f, size.height * 0.78f)
+                    cubicTo(
+                        size.width * 0.28f,
+                        size.height * 0.56f,
+                        size.width * 0.30f,
+                        size.height * 0.26f,
+                        size.width * 0.50f,
+                        size.height * 0.24f
+                    )
+                    cubicTo(
+                        size.width * 0.70f,
+                        size.height * 0.26f,
+                        size.width * 0.72f,
+                        size.height * 0.56f,
+                        size.width * 0.50f,
+                        size.height * 0.78f
+                    )
+                    close()
+                }
+                drawPath(path = pin, color = accent)
+                drawCircle(color = Color.White, radius = size.minDimension * 0.08f, center = Offset(size.width * 0.5f, size.height * 0.42f))
+            }
+        }
+    }
+}
+
+private fun accentForTripObjectType(type: TripObjectType): Color {
+    return when (type) {
+        TripObjectType.FAMILY_MEMBER -> Color(0xFF4F7CAC)
+        TripObjectType.HOTEL -> Color(0xFF176B5B)
+        TripObjectType.FOOD_PLACE -> Color(0xFFFF8A3D)
+        TripObjectType.TRANSPORTATION -> Color(0xFF00A6A6)
+        TripObjectType.SHOP -> Color(0xFF6C63FF)
+        TripObjectType.PAID_ATTRACTION -> Color(0xFF8B5CF6)
+        TripObjectType.FREE_ATTRACTION -> Color(0xFF2E9D62)
     }
 }
 
