@@ -34,6 +34,19 @@ interface PoolItemDao {
         FROM pool_items
         INNER JOIN pool_memberships ON pool_memberships.item_id = pool_items.id
         INNER JOIN item_pools ON item_pools.id = pool_memberships.pool_id
+        WHERE item_pools.type = 'TRIP'
+            AND item_pools.trip_id = :tripId
+        ORDER BY pool_memberships.priority_order ASC
+        """
+    )
+    fun observeTripPoolItems(tripId: Long): Flow<List<PoolItemEntity>>
+
+    @Query(
+        """
+        SELECT pool_items.*
+        FROM pool_items
+        INNER JOIN pool_memberships ON pool_memberships.item_id = pool_items.id
+        INNER JOIN item_pools ON item_pools.id = pool_memberships.pool_id
         WHERE item_pools.type = 'GENERAL'
             AND pool_items.type = :type
             AND pool_items.name = :name

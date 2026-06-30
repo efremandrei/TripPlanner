@@ -96,6 +96,7 @@ import com.tripplanner.app.model.TripObjectType
 import com.tripplanner.app.ui.map.TripMapView
 import com.tripplanner.app.util.GoogleMapsIntents
 import com.tripplanner.app.util.isOnline
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -965,11 +966,21 @@ private fun EmptyTripsCard(text: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GeneralPoolPanel(
+private fun ItemPoolPanel(
+    trips: List<TripEntity>,
+    selectedTripPoolId: Long?,
+    selectedTypeFilter: TripObjectType?,
     poolItems: List<PoolItemEntity>,
+    totalItemCount: Int,
+    currentTripObjectIds: Set<Long>,
+    onSelectTripPool: (Long?) -> Unit,
+    onSelectTypeFilter: (TripObjectType?) -> Unit,
     onUseItem: (PoolItemEntity) -> Unit
 ) {
+    val selectedTrip = trips.firstOrNull { it.id == selectedTripPoolId }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -978,26 +989,89 @@ private fun GeneralPoolPanel(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "General pool",
+                text = "Item pool",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            poolItems.forEach { poolItem ->
-                GeneralPoolItemRow(
-                    poolItem = poolItem,
-                    onUseItem = { onUseItem(poolItem) }
+            Text(
+                text = if (selectedTrip == null) {
+                    "General pool"
+                } else {
+                    "Trip pool: ${selectedTrip.title}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTripPoolId == null,
+                    onClick = { onSelectTripPool(null) },
+                    label = { Text("General") },
+                    shape = RoundedCornerShape(8.dp)
                 )
+                trips.forEach { trip ->
+                    FilterChip(
+                        selected = selectedTripPoolId == trip.id,
+                        onClick = { onSelectTripPool(trip.id) },
+                        label = { Text(trip.title) },
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTypeFilter == null,
+                    onClick = { onSelectTypeFilter(null) },
+                    label = { Text("All") },
+                    shape = RoundedCornerShape(8.dp)
+                )
+                TripObjectType.entries.forEach { type ->
+                    FilterChip(
+                        selected = selectedTypeFilter == type,
+                        onClick = { onSelectTypeFilter(type) },
+                        label = { Text(type.displayName) },
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            }
+            if (poolItems.isEmpty()) {
+                Text(
+                    text = if (totalItemCount == 0) {
+                        "No items in this pool yet"
+                    } else {
+                        "No items match this type"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                poolItems.forEach { poolItem ->
+                    PoolItemRow(
+                        poolItem = poolItem,
+                        isAlreadyInTrip = poolItem.id in currentTripObjectIds,
+                        onUseItem = { onUseItem(poolItem) }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun GeneralPoolItemRow(
+private fun PoolItemRow(
     poolItem: PoolItemEntity,
+    isAlreadyInTrip: Boolean,
     onUseItem: () -> Unit
 ) {
     val accent = accentForTripObjectType(poolItem.type)
@@ -1040,8 +1114,11 @@ private fun GeneralPoolItemRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        TextButton(onClick = onUseItem) {
-            Text("Use")
+        TextButton(
+            onClick = onUseItem,
+            enabled = !isAlreadyInTrip
+        ) {
+            Text(if (isAlreadyInTrip) "In trip" else "Use")
         }
     }
 }
@@ -1605,12 +1682,25 @@ private fun PlanNewTripScreen(
     var googleFetchStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
     var isFetchingGoogleDetails by remember { mutableStateOf(false) }
     var isLoadingTrip by remember(editingTripId) { mutableStateOf(editingTripId != null) }
+    var selectedPoolTripId by rememberSaveable(editingTripId) { mutableStateOf<Long?>(null) }
+    var selectedPoolTypeFilter by rememberSaveable(editingTripId) {
+        mutableStateOf<TripObjectType?>(null)
+    }
+    var showLinkedItemPicker by rememberSaveable(editingTripId, editingObjectId) {
+        mutableStateOf(false)
+    }
     val attributeValues = remember(editingTripId) { mutableStateMapOf<TripObjectAttribute, String>() }
     val relatedObjectIds = remember(editingTripId) { mutableStateListOf<Long>() }
     val tripObjects = remember(editingTripId) { mutableStateListOf<TripObjectDraft>() }
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
+    val activeTrips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
     val generalPoolItems by database.poolItemDao().observeGeneralPoolItems().collectAsState(initial = emptyList())
+    val selectedTripPoolItems by remember(database, selectedPoolTripId) {
+        selectedPoolTripId?.let { tripId ->
+            database.poolItemDao().observeTripPoolItems(tripId)
+        } ?: flowOf(emptyList<PoolItemEntity>())
+    }.collectAsState(initial = emptyList())
     val tripRepository = remember(database) { TripRepository(database) }
     val googlePlacesRepository = remember(database) {
         GooglePlacesRepository(
@@ -1813,31 +1903,41 @@ private fun PlanNewTripScreen(
                 fontWeight = FontWeight.SemiBold
             )
             val tripObjectIds = tripObjects.map { it.id }.toSet()
-            val reusablePoolItems = generalPoolItems.filter { poolItem ->
-                poolItem.id !in tripObjectIds
+            val selectedPoolItems = if (selectedPoolTripId == null) {
+                generalPoolItems
+            } else {
+                selectedTripPoolItems
             }
-            if (reusablePoolItems.isNotEmpty()) {
-                GeneralPoolPanel(
-                    poolItems = reusablePoolItems,
-                    onUseItem = { poolItem ->
-                        coroutineScope.launch {
-                            val pooledDraft = tripRepository.getPoolItemDraft(poolItem.id)
-                                ?: return@launch
-                            val currentObjectIds = tripObjects.map { it.id }.toSet()
-                            upsertTripObject(
-                                tripObjects = tripObjects,
-                                savedObject = pooledDraft.copy(
-                                    priorityOrder = nextAvailablePriority(),
-                                    relatedObjectIds = pooledDraft.relatedObjectIds
-                                        .filter { it in currentObjectIds }
-                                        .toSet()
-                                )
+            val visiblePoolItems = selectedPoolItems.filter { poolItem ->
+                selectedPoolTypeFilter == null || poolItem.type == selectedPoolTypeFilter
+            }
+            ItemPoolPanel(
+                trips = activeTrips,
+                selectedTripPoolId = selectedPoolTripId,
+                selectedTypeFilter = selectedPoolTypeFilter,
+                poolItems = visiblePoolItems,
+                totalItemCount = selectedPoolItems.size,
+                currentTripObjectIds = tripObjectIds,
+                onSelectTripPool = { selectedPoolTripId = it },
+                onSelectTypeFilter = { selectedPoolTypeFilter = it },
+                onUseItem = { poolItem ->
+                    coroutineScope.launch {
+                        val pooledDraft = tripRepository.getPoolItemDraft(poolItem.id)
+                            ?: return@launch
+                        val currentObjectIds = tripObjects.map { it.id }.toSet()
+                        upsertTripObject(
+                            tripObjects = tripObjects,
+                            savedObject = pooledDraft.copy(
+                                priorityOrder = nextAvailablePriority(),
+                                relatedObjectIds = pooledDraft.relatedObjectIds
+                                    .filter { it in currentObjectIds }
+                                    .toSet()
                             )
-                            saveStatus = "${poolItem.name} linked to this trip"
-                        }
+                        )
+                        saveStatus = "${poolItem.name} linked to this trip"
                     }
-                )
-            }
+                }
+            )
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -1948,32 +2048,52 @@ private fun PlanNewTripScreen(
                         .filter { it.id != editingObjectId }
                         .sortedBy { it.priorityOrder }
                     if (relatedObjectCandidates.isNotEmpty()) {
-                        Text(
-                            text = "Related objects",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        FlowRow(
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            relatedObjectCandidates.forEach { tripObject ->
-                                val isRelated = tripObject.id in relatedObjectIds
-                                FilterChip(
-                                    selected = isRelated,
-                                    onClick = {
-                                        if (isRelated) {
-                                            relatedObjectIds.remove(tripObject.id)
-                                        } else {
-                                            relatedObjectIds.add(tripObject.id)
-                                        }
-                                    },
-                                    label = {
-                                        Text("${tripObject.priorityOrder}. ${tripObject.name}")
-                                    },
-                                    shape = RoundedCornerShape(8.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Linked items",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
                                 )
+                                Text(
+                                    text = "${relatedObjectIds.size} selected",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(
+                                onClick = { showLinkedItemPicker = !showLinkedItemPicker }
+                            ) {
+                                Text(if (showLinkedItemPicker) "Hide" else "Show")
+                            }
+                        }
+                        if (showLinkedItemPicker) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                relatedObjectCandidates.forEach { tripObject ->
+                                    val isRelated = tripObject.id in relatedObjectIds
+                                    FilterChip(
+                                        selected = isRelated,
+                                        onClick = {
+                                            if (isRelated) {
+                                                relatedObjectIds.remove(tripObject.id)
+                                            } else {
+                                                relatedObjectIds.add(tripObject.id)
+                                            }
+                                        },
+                                        label = {
+                                            Text("${tripObject.priorityOrder}. ${tripObject.name}")
+                                        },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2127,6 +2247,12 @@ private fun PlanNewTripScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+        }
+    }
+
+    LaunchedEffect(activeTrips, selectedPoolTripId) {
+        if (selectedPoolTripId != null && activeTrips.none { it.id == selectedPoolTripId }) {
+            selectedPoolTripId = null
         }
     }
 }
@@ -2554,6 +2680,7 @@ private fun TripObjectRow(
     onEdit: () -> Unit
 ) {
     val accent = accentForTripObjectType(tripObject.type)
+    var showLinkedItems by rememberSaveable(tripObject.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -2630,11 +2757,26 @@ private fun TripObjectRow(
                 }
             }
             if (relatedObjects.isNotEmpty()) {
-                Text(
-                    text = "Related: ${relatedObjects.joinToString { "${it.priorityOrder}. ${it.name}" }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { showLinkedItems = !showLinkedItems }
+                    ) {
+                        Text(
+                            if (showLinkedItems) {
+                                "Hide linked items (${relatedObjects.size})"
+                            } else {
+                                "Show linked items (${relatedObjects.size})"
+                            }
+                        )
+                    }
+                    if (showLinkedItems) {
+                        Text(
+                            text = relatedObjects.joinToString { "${it.priorityOrder}. ${it.name}" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
         ObjectThumbnail(
