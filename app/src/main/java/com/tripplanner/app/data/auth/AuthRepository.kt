@@ -12,7 +12,8 @@ data class AuthSession(
 )
 
 enum class AuthProvider {
-    LOCAL
+    LOCAL,
+    GOOGLE
 }
 
 data class AuthOperationResult(
@@ -26,10 +27,13 @@ class AuthRepository(context: Context) {
     fun currentSession(): AuthSession? {
         val accountId = preferences.getString(KEY_SESSION_ACCOUNT_ID, null) ?: return null
         val displayName = preferences.getString(KEY_SESSION_DISPLAY_NAME, null) ?: accountId
+        val provider = preferences.getString(KEY_SESSION_PROVIDER, null)
+            ?.let { runCatching { AuthProvider.valueOf(it) }.getOrNull() }
+            ?: AuthProvider.LOCAL
         return AuthSession(
             accountId = accountId,
             displayName = displayName,
-            provider = AuthProvider.LOCAL
+            provider = provider
         )
     }
 
@@ -78,6 +82,7 @@ class AuthRepository(context: Context) {
         preferences.edit()
             .putString(KEY_SESSION_ACCOUNT_ID, normalizedAccountName)
             .putString(KEY_SESSION_DISPLAY_NAME, displayName)
+            .putString(KEY_SESSION_PROVIDER, AuthProvider.LOCAL.name)
             .apply()
 
         return AuthOperationResult(
@@ -89,10 +94,34 @@ class AuthRepository(context: Context) {
         )
     }
 
+    fun signInGoogle(
+        accountId: String,
+        displayName: String
+    ): AuthOperationResult {
+        val normalizedAccountId = accountId.normalizedAccountName()
+        if (normalizedAccountId.isBlank()) {
+            return AuthOperationResult(errorMessage = "Google account did not include an email")
+        }
+        preferences.edit()
+            .putString(KEY_SESSION_ACCOUNT_ID, normalizedAccountId)
+            .putString(KEY_SESSION_DISPLAY_NAME, displayName.ifBlank { normalizedAccountId })
+            .putString(KEY_SESSION_PROVIDER, AuthProvider.GOOGLE.name)
+            .apply()
+
+        return AuthOperationResult(
+            session = AuthSession(
+                accountId = normalizedAccountId,
+                displayName = displayName.ifBlank { normalizedAccountId },
+                provider = AuthProvider.GOOGLE
+            )
+        )
+    }
+
     fun signOut() {
         preferences.edit()
             .remove(KEY_SESSION_ACCOUNT_ID)
             .remove(KEY_SESSION_DISPLAY_NAME)
+            .remove(KEY_SESSION_PROVIDER)
             .apply()
     }
 
@@ -119,6 +148,7 @@ class AuthRepository(context: Context) {
         const val PREFERENCES_NAME = "trip_planner_auth"
         const val KEY_SESSION_ACCOUNT_ID = "session.accountId"
         const val KEY_SESSION_DISPLAY_NAME = "session.displayName"
+        const val KEY_SESSION_PROVIDER = "session.provider"
         const val MIN_PASSWORD_LENGTH = 4
     }
 }

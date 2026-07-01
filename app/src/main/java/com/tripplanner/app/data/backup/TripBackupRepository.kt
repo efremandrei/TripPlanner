@@ -2,6 +2,7 @@ package com.tripplanner.app.data.backup
 
 import android.content.Context
 import android.database.Cursor
+import android.net.Uri
 import android.os.Environment
 import android.util.Base64
 import androidx.room.withTransaction
@@ -80,13 +81,7 @@ class TripBackupRepository(
     }
 
     suspend fun exportWholeDatabase(): BackupOperationResult {
-        val backupJson = database.withTransaction {
-            JSONObject()
-                .put("formatVersion", FORMAT_VERSION)
-                .put("exportType", EXPORT_TYPE_WHOLE_DATABASE)
-                .put("exportedAtMillis", System.currentTimeMillis())
-                .put("tables", exportTables(database.openHelper.writableDatabase))
-        }
+        val backupJson = buildWholeDatabaseBackupJson()
         val file = exportFile(
             prefix = "trip-planner-whole-db",
             json = backupJson
@@ -97,44 +92,37 @@ class TripBackupRepository(
         )
     }
 
+    suspend fun exportWholeDatabaseToUri(uri: Uri): BackupOperationResult {
+        val backupJson = buildWholeDatabaseBackupJson()
+        writeJsonToUri(uri = uri, json = backupJson)
+        return BackupOperationResult(
+            message = "Whole DB exported to selected file"
+        )
+    }
+
     suspend fun importLatestWholeDatabase(): BackupOperationResult {
         val file = latestExportFile(prefix = "trip-planner-whole-db")
             ?: return BackupOperationResult("No whole DB export file found in ${exportDirectory.absolutePath}")
-        val backupJson = JSONObject(file.readText())
-        require(backupJson.optString("exportType") == EXPORT_TYPE_WHOLE_DATABASE) {
-            "Selected file is not a whole DB export"
-        }
-        database.withTransaction {
-            importTables(
-                db = database.openHelper.writableDatabase,
-                tablesJson = backupJson.getJSONObject("tables")
-            )
-        }
+        importWholeDatabaseJson(JSONObject(file.readText()))
         return BackupOperationResult(
             message = "Whole DB imported from ${file.name}",
             file = file
         )
     }
 
+    suspend fun importWholeDatabaseFromUri(uri: Uri): BackupOperationResult {
+        importWholeDatabaseJson(JSONObject(readTextFromUri(uri)))
+        return BackupOperationResult(
+            message = "Whole DB imported from selected file"
+        )
+    }
+
     suspend fun exportTrip(tripId: Long): BackupOperationResult {
-        val editableTrip = tripRepository.getEditableTrip(tripId)
+        val exportData = buildTripBackupJson(tripId)
             ?: return BackupOperationResult("Trip #$tripId was not found")
-        val tripJson = JSONObject()
-            .put("id", editableTrip.trip.id)
-            .put("title", editableTrip.trip.title)
-            .put("destination", editableTrip.trip.destination)
-            .put("startDate", editableTrip.trip.startDate)
-            .put("endDate", editableTrip.trip.endDate)
-            .put("isArchived", editableTrip.trip.isArchived)
-        val backupJson = JSONObject()
-            .put("formatVersion", FORMAT_VERSION)
-            .put("exportType", EXPORT_TYPE_TRIP)
-            .put("exportedAtMillis", System.currentTimeMillis())
-            .put("trip", tripJson)
-            .put("objects", JSONArray(editableTrip.objects.map(::tripObjectToJson)))
         val file = exportFile(
-            prefix = "trip-planner-trip-${tripId}-${editableTrip.trip.destination.safeFilePart()}",
-            json = backupJson
+            prefix = "trip-planner-trip-${tripId}-${exportData.destination.safeFilePart()}",
+            json = exportData.json
         )
         return BackupOperationResult(
             message = "Trip exported to ${file.absolutePath}",
@@ -142,29 +130,44 @@ class TripBackupRepository(
         )
     }
 
+    suspend fun exportTripToUri(tripId: Long, uri: Uri): BackupOperationResult {
+        val exportData = buildTripBackupJson(tripId)
+            ?: return BackupOperationResult("Trip #$tripId was not found")
+        writeJsonToUri(uri = uri, json = exportData.json)
+        return BackupOperationResult(
+            message = "Trip exported to selected file"
+        )
+    }
+
     suspend fun importLatestTripExport(): BackupOperationResult {
         val file = latestExportFile(prefix = "trip-planner-trip")
             ?: return BackupOperationResult("No trip export file found in ${exportDirectory.absolutePath}")
-        val backupJson = JSONObject(file.readText())
-        require(backupJson.optString("exportType") == EXPORT_TYPE_TRIP) {
-            "Selected file is not a trip export"
-        }
-        val tripJson = backupJson.getJSONObject("trip")
-        val objects = parseTripObjects(backupJson.getJSONArray("objects"))
-        val importedObjects = remapImportedObjects(objects)
-        val result = tripRepository.createTrip(
-            destination = tripJson.optString("destination", "Imported trip"),
-            startDate = tripJson.optString("startDate"),
-            endDate = tripJson.optString("endDate"),
-            objects = importedObjects
-        )
+        val result = importTripJson(JSONObject(file.readText()))
         return BackupOperationResult(
             message = "Trip imported from ${file.name} as #${result.tripId}",
             file = file
         )
     }
 
+    suspend fun importTripExportFromUri(uri: Uri): BackupOperationResult {
+        val result = importTripJson(JSONObject(readTextFromUri(uri)))
+        return BackupOperationResult(
+            message = "Trip imported from selected file as #${result.tripId}"
+        )
+    }
+
     fun exportDirectoryPath(): String = exportDirectory.absolutePath
+
+    fun wholeDatabaseExportFileName(): String {
+        return "trip-planner-whole-db-${timestamp()}.json"
+    }
+
+    fun tripExportFileName(
+        tripId: Long,
+        destination: String
+    ): String {
+        return "trip-planner-trip-$tripId-${destination.safeFilePart()}-${timestamp()}.json"
+    }
 
     private fun englandFamilyTripObjects(): List<TripObjectDraft> {
         val objects = mutableListOf<TripObjectDraft>()
@@ -971,6 +974,88 @@ class TripBackupRepository(
         )
 
         return objects
+    }
+
+    private data class TripBackupJson(
+        val json: JSONObject,
+        val destination: String
+    )
+
+    private suspend fun buildWholeDatabaseBackupJson(): JSONObject {
+        return database.withTransaction {
+            JSONObject()
+                .put("formatVersion", FORMAT_VERSION)
+                .put("exportType", EXPORT_TYPE_WHOLE_DATABASE)
+                .put("exportedAtMillis", System.currentTimeMillis())
+                .put("tables", exportTables(database.openHelper.writableDatabase))
+        }
+    }
+
+    private suspend fun importWholeDatabaseJson(backupJson: JSONObject) {
+        require(backupJson.optString("exportType") == EXPORT_TYPE_WHOLE_DATABASE) {
+            "Selected file is not a whole DB export"
+        }
+        database.withTransaction {
+            importTables(
+                db = database.openHelper.writableDatabase,
+                tablesJson = backupJson.getJSONObject("tables")
+            )
+        }
+    }
+
+    private suspend fun buildTripBackupJson(tripId: Long): TripBackupJson? {
+        val editableTrip = tripRepository.getEditableTrip(tripId) ?: return null
+        val tripJson = JSONObject()
+            .put("id", editableTrip.trip.id)
+            .put("title", editableTrip.trip.title)
+            .put("destination", editableTrip.trip.destination)
+            .put("startDate", editableTrip.trip.startDate)
+            .put("endDate", editableTrip.trip.endDate)
+            .put("isArchived", editableTrip.trip.isArchived)
+        val backupJson = JSONObject()
+            .put("formatVersion", FORMAT_VERSION)
+            .put("exportType", EXPORT_TYPE_TRIP)
+            .put("exportedAtMillis", System.currentTimeMillis())
+            .put("trip", tripJson)
+            .put("objects", JSONArray(editableTrip.objects.map(::tripObjectToJson)))
+        return TripBackupJson(
+            json = backupJson,
+            destination = editableTrip.trip.destination
+        )
+    }
+
+    private suspend fun importTripJson(backupJson: JSONObject): com.tripplanner.app.data.CreatedTripResult {
+        require(backupJson.optString("exportType") == EXPORT_TYPE_TRIP) {
+            "Selected file is not a trip export"
+        }
+        val tripJson = backupJson.getJSONObject("trip")
+        val objects = parseTripObjects(backupJson.getJSONArray("objects"))
+        val importedObjects = remapImportedObjects(objects)
+        return tripRepository.createTrip(
+            destination = tripJson.optString("destination", "Imported trip"),
+            startDate = tripJson.optString("startDate"),
+            endDate = tripJson.optString("endDate"),
+            objects = importedObjects
+        )
+    }
+
+    private fun writeJsonToUri(
+        uri: Uri,
+        json: JSONObject
+    ) {
+        val outputStream = appContext.contentResolver.openOutputStream(uri)
+            ?: error("Could not open selected export file")
+        outputStream.bufferedWriter().use { writer ->
+            writer.write(json.toString(2))
+        }
+    }
+
+    private fun readTextFromUri(uri: Uri): String {
+        val inputStream = appContext.contentResolver.openInputStream(uri)
+            ?: error("Could not open selected import file")
+        return inputStream.bufferedReader().use { reader ->
+            reader.readText()
+        }
     }
 
     private fun exportTables(db: SupportSQLiteDatabase): JSONObject {

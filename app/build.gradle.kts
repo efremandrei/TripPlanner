@@ -8,10 +8,14 @@ val localProperties = Properties().apply {
 }
 val mapsApiKey = localProperties.getProperty("MAPS_API_KEY").orEmpty()
 val placesApiKey = localProperties.getProperty("PLACES_API_KEY").orEmpty()
+val googleWebClientId = localProperties.getProperty("GOOGLE_WEB_CLIENT_ID").orEmpty()
 val escapedMapsApiKey = mapsApiKey
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 val escapedPlacesApiKey = placesApiKey
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+val escapedGoogleWebClientId = googleWebClientId
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
@@ -36,6 +40,7 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$escapedMapsApiKey\"")
         buildConfigField("String", "PLACES_API_KEY", "\"$escapedPlacesApiKey\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$escapedGoogleWebClientId\"")
         buildConfigField("boolean", "PREPOPULATE_MOCK_DB", "false")
     }
 
@@ -74,6 +79,8 @@ ksp {
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
@@ -81,6 +88,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.runtime)
     implementation(libs.google.play.services.maps)
+    implementation(libs.google.id)
     implementation(libs.google.places)
     ksp(libs.androidx.room.compiler)
 }

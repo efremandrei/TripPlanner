@@ -2,11 +2,15 @@ package com.tripplanner.app
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -80,8 +84,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
 import com.tripplanner.app.data.auth.AuthRepository
 import com.tripplanner.app.data.auth.AuthProvider
+import com.tripplanner.app.data.auth.AuthOperationResult
 import com.tripplanner.app.data.auth.AuthSession
 import com.tripplanner.app.data.backup.TripBackupRepository
 import com.tripplanner.app.data.google.GooglePlaceDetails
@@ -96,6 +105,10 @@ import com.tripplanner.app.model.TripObjectType
 import com.tripplanner.app.ui.map.TripMapView
 import com.tripplanner.app.util.GoogleMapsIntents
 import com.tripplanner.app.util.isOnline
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import java.security.SecureRandom
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
@@ -124,6 +137,61 @@ private enum class AppSkin(val label: String) {
 private enum class AuthMode {
     LocalLogin,
     CreateAccount
+}
+
+private suspend fun signInWithGoogleAccount(
+    activity: Activity,
+    authRepository: AuthRepository
+): AuthOperationResult {
+    val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID.trim()
+    if (webClientId.isBlank()) {
+        return AuthOperationResult(
+            errorMessage = "Set GOOGLE_WEB_CLIENT_ID in local.properties to enable Google sign-in"
+        )
+    }
+
+    val credentialManager = CredentialManager.create(activity)
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setFilterByAuthorizedAccounts(false)
+        .setServerClientId(webClientId)
+        .setNonce(generateSecureRandomNonce())
+        .build()
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
+
+    return try {
+        val result = credentialManager.getCredential(
+            request = request,
+            context = activity
+        )
+        val credential = result.credential
+        if (
+            credential is CustomCredential &&
+            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+            authRepository.signInGoogle(
+                accountId = googleCredential.id,
+                displayName = googleCredential.displayName ?: googleCredential.id
+            )
+        } else {
+            AuthOperationResult(errorMessage = "Google returned an unsupported credential")
+        }
+    } catch (_: GoogleIdTokenParsingException) {
+        AuthOperationResult(errorMessage = "Google returned an invalid ID token")
+    } catch (error: GetCredentialException) {
+        AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
+    }
+}
+
+private fun generateSecureRandomNonce(byteLength: Int = 32): String {
+    val randomBytes = ByteArray(byteLength)
+    SecureRandom().nextBytes(randomBytes)
+    return Base64.encodeToString(
+        randomBytes,
+        Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
+    )
 }
 
 @Composable
@@ -182,7 +250,17 @@ private fun TripPlannerApp() {
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
                     onGoogleSignIn = {
-                        "Google sign-in needs OAuth client configuration"
+                        val hostActivity = activity
+                        if (hostActivity == null) {
+                            "Google sign-in needs an active activity"
+                        } else {
+                            signInWithGoogleAccount(
+                                activity = hostActivity,
+                                authRepository = authRepository
+                            ).also { result ->
+                                result.session?.let { authSession = it }
+                            }.errorMessage
+                        }
                     },
                     onLocalSignIn = { accountName, password ->
                         authRepository.signInLocal(
@@ -290,6 +368,38 @@ private fun MainMenuScreen(
     }
     val coroutineScope = rememberCoroutineScope()
     var databaseStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    val exportWholeDbLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri == null) {
+            databaseStatus = "Whole DB export cancelled"
+        } else {
+            coroutineScope.launch {
+                databaseStatus = "Exporting whole database"
+                databaseStatus = runCatching {
+                    backupRepository.exportWholeDatabaseToUri(uri).message
+                }.getOrElse { error ->
+                    error.message ?: "Whole database could not be exported"
+                }
+            }
+        }
+    }
+    val importWholeDbLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) {
+            databaseStatus = "Whole DB import cancelled"
+        } else {
+            coroutineScope.launch {
+                databaseStatus = "Importing selected whole database export"
+                databaseStatus = runCatching {
+                    backupRepository.importWholeDatabaseFromUri(uri).message
+                }.getOrElse { error ->
+                    error.message ?: "Whole database could not be imported"
+                }
+            }
+        }
+    }
 
     Scaffold { innerPadding ->
         Column(
@@ -333,7 +443,6 @@ private fun MainMenuScreen(
             )
             DatabaseToolsPanel(
                 status = databaseStatus,
-                exportDirectory = backupRepository.exportDirectoryPath(),
                 onPopulateMockDb = {
                     coroutineScope.launch {
                         databaseStatus = "Populating mock database"
@@ -355,24 +464,10 @@ private fun MainMenuScreen(
                     }
                 },
                 onExportWholeDb = {
-                    coroutineScope.launch {
-                        databaseStatus = "Exporting whole database"
-                        databaseStatus = runCatching {
-                            backupRepository.exportWholeDatabase().message
-                        }.getOrElse { error ->
-                            error.message ?: "Whole database could not be exported"
-                        }
-                    }
+                    exportWholeDbLauncher.launch(backupRepository.wholeDatabaseExportFileName())
                 },
                 onImportWholeDb = {
-                    coroutineScope.launch {
-                        databaseStatus = "Importing latest whole database export"
-                        databaseStatus = runCatching {
-                            backupRepository.importLatestWholeDatabase().message
-                        }.getOrElse { error ->
-                            error.message ?: "Whole database could not be imported"
-                        }
-                    }
+                    importWholeDbLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
                 }
             )
         }
@@ -383,7 +478,7 @@ private fun MainMenuScreen(
 private fun AuthScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
-    onGoogleSignIn: () -> String?,
+    onGoogleSignIn: suspend () -> String?,
     onLocalSignIn: (String, String) -> String?,
     onCreateAccount: (String, String) -> String?
 ) {
@@ -391,6 +486,7 @@ private fun AuthScreen(
     var accountName by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var authStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold { innerPadding ->
         Column(
@@ -414,10 +510,13 @@ private fun AuthScreen(
             )
             HomeActionCard(
                 title = "Log in with Google account",
-                subtitle = "OAuth setup required before live Google sign-in",
+                subtitle = "Uses Google Credential Manager when client ID is configured",
                 accent = Color(0xFF4F7CAC),
                 onClick = {
-                    authStatus = onGoogleSignIn() ?: "Google account signed in"
+                    coroutineScope.launch {
+                        authStatus = "Opening Google sign-in"
+                        authStatus = onGoogleSignIn() ?: "Google account signed in"
+                    }
                 }
             )
             FlowRow(
@@ -521,7 +620,6 @@ private fun AuthScreen(
 @Composable
 private fun DatabaseToolsPanel(
     status: String?,
-    exportDirectory: String,
     onPopulateMockDb: () -> Unit,
     onClearMockedData: () -> Unit,
     onExportWholeDb: () -> Unit,
@@ -604,10 +702,10 @@ private fun DatabaseToolsPanel(
                 onClick = onImportWholeDb,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Import latest whole DB")
+                Text("Import whole DB")
             }
             Text(
-                text = "Files: $exportDirectory",
+                text = "Export and import ask you to choose a file location.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -644,6 +742,44 @@ private fun TripManagementScreen(
     }
     val coroutineScope = rememberCoroutineScope()
     var tripBackupStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingTripExportId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val exportTripLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        val tripId = pendingTripExportId
+        pendingTripExportId = null
+        if (uri == null || tripId == null) {
+            tripBackupStatus = "Trip export cancelled"
+        } else {
+            coroutineScope.launch {
+                tripBackupStatus = "Exporting trip"
+                tripBackupStatus = runCatching {
+                    backupRepository.exportTripToUri(
+                        tripId = tripId,
+                        uri = uri
+                    ).message
+                }.getOrElse { error ->
+                    error.message ?: "Trip could not be exported"
+                }
+            }
+        }
+    }
+    val importTripLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) {
+            tripBackupStatus = "Trip import cancelled"
+        } else {
+            coroutineScope.launch {
+                tripBackupStatus = "Importing selected trip export"
+                tripBackupStatus = runCatching {
+                    backupRepository.importTripExportFromUri(uri).message
+                }.getOrElse { error ->
+                    error.message ?: "Trip export could not be imported"
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -688,18 +824,11 @@ private fun TripManagementScreen(
                     .fillMaxWidth()
                     .height(48.dp),
                 onClick = {
-                    coroutineScope.launch {
-                        tripBackupStatus = "Importing latest trip export"
-                        tripBackupStatus = runCatching {
-                            backupRepository.importLatestTripExport().message
-                        }.getOrElse { error ->
-                            error.message ?: "Trip export could not be imported"
-                        }
-                    }
+                    importTripLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
                 },
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Import latest trip export")
+                Text("Import trip export")
             }
             tripBackupStatus?.let { status ->
                 Text(
@@ -724,14 +853,13 @@ private fun TripManagementScreen(
                         accent = MaterialTheme.colorScheme.primary,
                         onClick = { onEditTrip(trip.id) },
                         onSecondaryClick = {
-                            coroutineScope.launch {
-                                tripBackupStatus = "Exporting ${trip.title}"
-                                tripBackupStatus = runCatching {
-                                    backupRepository.exportTrip(trip.id).message
-                                }.getOrElse { error ->
-                                    error.message ?: "Trip could not be exported"
-                                }
-                            }
+                            pendingTripExportId = trip.id
+                            exportTripLauncher.launch(
+                                backupRepository.tripExportFileName(
+                                    tripId = trip.id,
+                                    destination = trip.destination
+                                )
+                            )
                         }
                     )
                 }
@@ -1230,7 +1358,7 @@ private fun AppHeaderBar(
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
@@ -1238,14 +1366,14 @@ private fun AppHeaderBar(
             Text(
                 text = "TP",
                 color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
         }
         Text(
             modifier = Modifier.weight(1f),
             text = "Trip Planner",
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
         )
