@@ -27,7 +27,8 @@ data class EditableTripDraft(
 )
 
 class TripRepository(
-    private val database: TripPlannerDatabase
+    private val database: TripPlannerDatabase,
+    private val ownerAccountId: String? = null
 ) {
     suspend fun createTrip(
         destination: String,
@@ -42,6 +43,7 @@ class TripRepository(
                 TripEntity(
                     title = tripTitle,
                     destination = destination.trim(),
+                    ownerAccountId = ownerAccountId,
                     startDate = startDate.trim(),
                     endDate = endDate.trim(),
                     createdAtMillis = now,
@@ -91,6 +93,7 @@ class TripRepository(
                 existingTrip.copy(
                     title = tripTitle,
                     destination = destination.trim(),
+                    ownerAccountId = existingTrip.ownerAccountId ?: ownerAccountId,
                     startDate = startDate.trim(),
                     endDate = endDate.trim(),
                     updatedAtMillis = now

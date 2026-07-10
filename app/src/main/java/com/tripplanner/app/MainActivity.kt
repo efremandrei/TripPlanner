@@ -315,6 +315,7 @@ private fun TripPlannerApp() {
                     )
 
                     Screen.PlanNewTrip -> PlanNewTripScreen(
+                        authSession = session,
                         appSkin = appSkin,
                         onAppSkinChange = { appSkin = it },
                         editingTripId = editingTripId,
@@ -360,10 +361,11 @@ private fun MainMenuScreen(
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
-    val backupRepository = remember(database) {
+    val backupRepository = remember(database, authSession.accountId) {
         TripBackupRepository(
             context = context.applicationContext,
-            database = database
+            database = database,
+            ownerAccountId = authSession.accountId
         )
     }
     val coroutineScope = rememberCoroutineScope()
@@ -733,11 +735,14 @@ private fun TripManagementScreen(
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
-    val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
-    val backupRepository = remember(database) {
+    val trips by database.tripDao()
+        .observeActiveTripsForAccount(authSession.accountId)
+        .collectAsState(initial = emptyList())
+    val backupRepository = remember(database, authSession.accountId) {
         TripBackupRepository(
             context = context.applicationContext,
-            database = database
+            database = database,
+            ownerAccountId = authSession.accountId
         )
     }
     val coroutineScope = rememberCoroutineScope()
@@ -879,8 +884,15 @@ private fun UseExistingTripScreen(
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
-    val tripRepository = remember(database) { TripRepository(database) }
-    val trips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
+    val tripRepository = remember(database, authSession.accountId) {
+        TripRepository(
+            database = database,
+            ownerAccountId = authSession.accountId
+        )
+    }
+    val trips by database.tripDao()
+        .observeActiveTripsForAccount(authSession.accountId)
+        .collectAsState(initial = emptyList())
     var selectedTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var useStatus by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedTripObjects = remember { mutableStateListOf<TripObjectDraft>() }
@@ -1792,6 +1804,7 @@ private fun BottomAppNavigation(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun PlanNewTripScreen(
+    authSession: AuthSession,
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
     editingTripId: Long?,
@@ -1822,14 +1835,21 @@ private fun PlanNewTripScreen(
     val tripObjects = remember(editingTripId) { mutableStateListOf<TripObjectDraft>() }
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
-    val activeTrips by database.tripDao().observeActiveTrips().collectAsState(initial = emptyList())
+    val activeTrips by database.tripDao()
+        .observeActiveTripsForAccount(authSession.accountId)
+        .collectAsState(initial = emptyList())
     val generalPoolItems by database.poolItemDao().observeGeneralPoolItems().collectAsState(initial = emptyList())
     val selectedTripPoolItems by remember(database, selectedPoolTripId) {
         selectedPoolTripId?.let { tripId ->
             database.poolItemDao().observeTripPoolItems(tripId)
         } ?: flowOf(emptyList<PoolItemEntity>())
     }.collectAsState(initial = emptyList())
-    val tripRepository = remember(database) { TripRepository(database) }
+    val tripRepository = remember(database, authSession.accountId) {
+        TripRepository(
+            database = database,
+            ownerAccountId = authSession.accountId
+        )
+    }
     val googlePlacesRepository = remember(database) {
         GooglePlacesRepository(
             context = context.applicationContext,
@@ -3119,6 +3139,11 @@ private fun MainMenuPreview() {
 private fun PlanNewTripPreview() {
     TripPlannerTheme {
         PlanNewTripScreen(
+            authSession = AuthSession(
+                accountId = "preview",
+                displayName = "Preview",
+                provider = AuthProvider.LOCAL
+            ),
             appSkin = AppSkin.System,
             onAppSkinChange = {},
             editingTripId = null,

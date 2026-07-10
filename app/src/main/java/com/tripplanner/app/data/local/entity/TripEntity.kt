@@ -10,6 +10,8 @@ data class TripEntity(
     val id: Long = 0,
     val title: String,
     val destination: String,
+    @ColumnInfo(name = "owner_account_id")
+    val ownerAccountId: String? = null,
     @ColumnInfo(name = "start_date")
     val startDate: String,
     @ColumnInfo(name = "end_date")

@@ -15,8 +15,28 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE is_archived = 0 ORDER BY updated_at_millis DESC")
     fun observeActiveTrips(): Flow<List<TripEntity>>
 
+    @Query(
+        """
+        SELECT * FROM trips
+        WHERE is_archived = 0
+            AND (owner_account_id IS NULL OR owner_account_id = :ownerAccountId)
+        ORDER BY updated_at_millis DESC
+        """
+    )
+    fun observeActiveTripsForAccount(ownerAccountId: String): Flow<List<TripEntity>>
+
     @Query("SELECT * FROM trips WHERE is_archived = 1 ORDER BY updated_at_millis DESC")
     fun observeArchivedTrips(): Flow<List<TripEntity>>
+
+    @Query(
+        """
+        SELECT * FROM trips
+        WHERE is_archived = 1
+            AND (owner_account_id IS NULL OR owner_account_id = :ownerAccountId)
+        ORDER BY updated_at_millis DESC
+        """
+    )
+    fun observeArchivedTripsForAccount(ownerAccountId: String): Flow<List<TripEntity>>
 
     @Query("SELECT * FROM trips WHERE id = :tripId")
     suspend fun getTrip(tripId: Long): TripEntity?

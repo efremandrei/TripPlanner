@@ -41,7 +41,7 @@ import com.tripplanner.app.data.local.entity.TripObjectRelationEntity
         PoolItemRelationEntity::class,
         PoolMembershipEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(TripPlannerTypeConverters::class)
@@ -249,6 +249,12 @@ abstract class TripPlannerDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `owner_account_id` TEXT")
+            }
+        }
+
         fun create(context: Context): TripPlannerDatabase {
             return Room.databaseBuilder(
                 context.applicationContext,
@@ -256,7 +262,7 @@ abstract class TripPlannerDatabase : RoomDatabase() {
                 "trip-planner.db"
             )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
     }

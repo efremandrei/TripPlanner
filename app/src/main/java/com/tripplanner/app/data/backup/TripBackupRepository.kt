@@ -26,14 +26,18 @@ data class BackupOperationResult(
 
 class TripBackupRepository(
     context: Context,
-    private val database: TripPlannerDatabase
+    private val database: TripPlannerDatabase,
+    ownerAccountId: String? = null
 ) {
     private val appContext = context.applicationContext
     private val mockSeedPreferences = appContext.getSharedPreferences(
         MOCK_SEED_PREFERENCES_NAME,
         Context.MODE_PRIVATE
     )
-    private val tripRepository = TripRepository(database)
+    private val tripRepository = TripRepository(
+        database = database,
+        ownerAccountId = ownerAccountId
+    )
     private val exportDirectory: File = File(
         appContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: appContext.filesDir,
         EXPORT_DIRECTORY_NAME
