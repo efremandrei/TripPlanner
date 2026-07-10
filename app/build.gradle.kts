@@ -6,9 +6,16 @@ val localProperties = Properties().apply {
         localPropertiesFile.inputStream().use(::load)
     }
 }
-val mapsApiKey = localProperties.getProperty("MAPS_API_KEY").orEmpty()
-val placesApiKey = localProperties.getProperty("PLACES_API_KEY").orEmpty()
-val googleWebClientId = localProperties.getProperty("GOOGLE_WEB_CLIENT_ID").orEmpty()
+fun configuredValue(name: String): String {
+    return localProperties.getProperty(name)
+        ?: providers.gradleProperty(name).orNull
+        ?: providers.environmentVariable(name).orNull
+        ?: ""
+}
+
+val mapsApiKey = configuredValue("MAPS_API_KEY")
+val placesApiKey = configuredValue("PLACES_API_KEY")
+val googleWebClientId = configuredValue("GOOGLE_WEB_CLIENT_ID")
 val escapedMapsApiKey = mapsApiKey
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")

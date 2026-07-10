@@ -84,10 +84,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.tripplanner.app.data.auth.AuthRepository
 import com.tripplanner.app.data.auth.AuthProvider
 import com.tripplanner.app.data.auth.AuthOperationResult
@@ -106,6 +108,7 @@ import com.tripplanner.app.ui.map.TripMapView
 import com.tripplanner.app.util.GoogleMapsIntents
 import com.tripplanner.app.util.isOnline
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import java.security.SecureRandom
@@ -146,43 +149,86 @@ private suspend fun signInWithGoogleAccount(
     val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID.trim()
     if (webClientId.isBlank()) {
         return AuthOperationResult(
-            errorMessage = "Set GOOGLE_WEB_CLIENT_ID in local.properties to enable Google sign-in"
+            errorMessage = "Google sign-in is not configured in this APK. Rebuild with GOOGLE_WEB_CLIENT_ID."
         )
     }
 
     val credentialManager = CredentialManager.create(activity)
+    val signInOption = GetSignInWithGoogleOption.Builder(webClientId)
+        .setNonce(generateSecureRandomNonce())
+        .build()
+    val signInRequest = GetCredentialRequest.Builder()
+        .addCredentialOption(signInOption)
+        .build()
+
+    return try {
+        requestGoogleCredential(
+            credentialManager = credentialManager,
+            activity = activity,
+            request = signInRequest,
+            authRepository = authRepository
+        )
+    } catch (_: NoCredentialException) {
+        try {
+            requestGoogleCredential(
+                credentialManager = credentialManager,
+                activity = activity,
+                request = createGoogleAccountChooserRequest(webClientId),
+                authRepository = authRepository
+            )
+        } catch (_: NoCredentialException) {
+            AuthOperationResult(errorMessage = "No Google account is available on this device")
+        } catch (error: GetCredentialException) {
+            AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
+        }
+    } catch (error: GetCredentialException) {
+        AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
+    }
+}
+
+private fun createGoogleAccountChooserRequest(webClientId: String): GetCredentialRequest {
     val googleIdOption = GetGoogleIdOption.Builder()
         .setFilterByAuthorizedAccounts(false)
         .setServerClientId(webClientId)
         .setNonce(generateSecureRandomNonce())
         .build()
-    val request = GetCredentialRequest.Builder()
+
+    return GetCredentialRequest.Builder()
         .addCredentialOption(googleIdOption)
         .build()
+}
+
+private suspend fun requestGoogleCredential(
+    credentialManager: CredentialManager,
+    activity: Activity,
+    request: GetCredentialRequest,
+    authRepository: AuthRepository
+): AuthOperationResult {
+    val result = credentialManager.getCredential(
+        request = request,
+        context = activity
+    )
+    val credential = result.credential
+    if (
+        credential !is CustomCredential ||
+        credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+    ) {
+        return AuthOperationResult(errorMessage = "Google returned an unsupported credential")
+    }
 
     return try {
-        val result = credentialManager.getCredential(
-            request = request,
-            context = activity
+        val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+        authRepository.signInGoogle(
+            accountId = googleCredential.id,
+            displayName = googleCredential.displayName ?: googleCredential.id
         )
-        val credential = result.credential
-        if (
-            credential is CustomCredential &&
-            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-        ) {
-            val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-            authRepository.signInGoogle(
-                accountId = googleCredential.id,
-                displayName = googleCredential.displayName ?: googleCredential.id
-            )
-        } else {
-            AuthOperationResult(errorMessage = "Google returned an unsupported credential")
-        }
     } catch (_: GoogleIdTokenParsingException) {
         AuthOperationResult(errorMessage = "Google returned an invalid ID token")
-    } catch (error: GetCredentialException) {
-        AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
     }
+}
+
+private suspend fun clearGoogleCredentialState(activity: Activity) {
+    CredentialManager.create(activity).clearCredentialState(ClearCredentialStateRequest())
 }
 
 private fun generateSecureRandomNonce(byteLength: Int = 32): String {
@@ -204,6 +250,7 @@ private fun TripPlannerApp() {
     val activity = context as? Activity
     val authRepository = remember(context) { AuthRepository(context.applicationContext) }
     val database = (context.applicationContext as TripPlannerApplication).database
+    val appCoroutineScope = rememberCoroutineScope()
     val startupBackupRepository = remember(database) {
         TripBackupRepository(
             context = context.applicationContext,
@@ -218,6 +265,13 @@ private fun TripPlannerApp() {
     }
 
     fun signOut() {
+        val session = authSession
+        val hostActivity = activity
+        if (session?.provider == AuthProvider.GOOGLE && hostActivity != null) {
+            appCoroutineScope.launch {
+                runCatching { clearGoogleCredentialState(hostActivity) }
+            }
+        }
         authRepository.signOut()
         authSession = null
         returnToMainPage()
@@ -489,6 +543,12 @@ private fun AuthScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var authStatus by rememberSaveable { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
+    val isGoogleSignInConfigured = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
+    val googleSignInSubtitle = if (isGoogleSignInConfigured) {
+        "Use this device's Google account"
+    } else {
+        "Rebuild with GOOGLE_WEB_CLIENT_ID"
+    }
 
     Scaffold { innerPadding ->
         Column(
@@ -512,7 +572,7 @@ private fun AuthScreen(
             )
             HomeActionCard(
                 title = "Log in with Google account",
-                subtitle = "Uses Google Credential Manager when client ID is configured",
+                subtitle = googleSignInSubtitle,
                 accent = Color(0xFF4F7CAC),
                 onClick = {
                     coroutineScope.launch {
