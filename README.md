@@ -45,3 +45,9 @@ PLACES_API_KEY=...
 ```
 
 The app uses Android Credential Manager for Google sign-in. If `GOOGLE_WEB_CLIENT_ID` is missing, the APK still builds and local accounts still work, but the Google login button will show that the APK needs to be rebuilt with that value.
+
+Security and cost controls for the Google Cloud project are tracked in:
+
+```text
+docs/google-security-cost-controls.md
+```
