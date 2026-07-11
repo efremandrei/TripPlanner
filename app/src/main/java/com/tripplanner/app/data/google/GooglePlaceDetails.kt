@@ -11,3 +11,9 @@ data class GooglePlaceDetails(
     val googleMapsUri: String?,
     val openingHours: String?
 )
+
+data class GooglePlaceSearchResult(
+    val placeId: String,
+    val primaryText: String,
+    val secondaryText: String?
+)

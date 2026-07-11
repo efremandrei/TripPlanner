@@ -3,9 +3,11 @@ package com.tripplanner.app.data.google
 import android.content.Context
 import com.google.android.gms.tasks.Task
 import com.google.android.libraries.places.api.Places
+import com.google.android.libraries.places.api.model.AutocompletePrediction
+import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
-import com.google.android.libraries.places.api.net.FetchPlaceResponse
+import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.tripplanner.app.BuildConfig
 import com.tripplanner.app.data.local.dao.GooglePlaceCacheDao
 import com.tripplanner.app.data.local.entity.GooglePlaceCacheEntity
@@ -43,6 +45,28 @@ class GooglePlacesRepository(
         return details
     }
 
+    suspend fun searchPlaces(query: String): List<GooglePlaceSearchResult> {
+        val normalizedQuery = query.trim()
+        require(normalizedQuery.isNotBlank()) { "Search text is required" }
+        require(isConfigured) { "Places API key is not configured" }
+
+        usageLimiter?.tryConsume(GoogleApiSku.PLACES_AUTOCOMPLETE)?.let { decision ->
+            if (!decision.allowed) {
+                error(decision.message)
+            }
+        }
+
+        val request = FindAutocompletePredictionsRequest.builder()
+            .setSessionToken(AutocompleteSessionToken.newInstance())
+            .setQuery(normalizedQuery)
+            .build()
+        return Places.createClient(context)
+            .findAutocompletePredictions(request)
+            .await()
+            .autocompletePredictions
+            .mapNotNull { prediction -> prediction.toSearchResult() }
+    }
+
     suspend fun getCachedPlace(placeId: String): GooglePlaceDetails? {
         return cacheDao.getPlace(placeId.trim())?.toDetails()
     }
@@ -66,6 +90,15 @@ class GooglePlacesRepository(
             websiteUrl = getWebsiteUri()?.toString(),
             googleMapsUri = getGoogleMapsUri()?.toString(),
             openingHours = openingHoursText
+        )
+    }
+
+    private fun AutocompletePrediction.toSearchResult(): GooglePlaceSearchResult? {
+        val placeId = getPlaceId().takeIf { it.isNotBlank() } ?: return null
+        return GooglePlaceSearchResult(
+            placeId = placeId,
+            primaryText = getPrimaryText(null).toString(),
+            secondaryText = getSecondaryText(null).toString().takeIf { it.isNotBlank() }
         )
     }
 

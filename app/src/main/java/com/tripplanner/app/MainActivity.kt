@@ -98,6 +98,7 @@ import com.tripplanner.app.data.auth.AuthSession
 import com.tripplanner.app.data.backup.TripBackupRepository
 import com.tripplanner.app.data.google.GoogleApiSku
 import com.tripplanner.app.data.google.GooglePlaceDetails
+import com.tripplanner.app.data.google.GooglePlaceSearchResult
 import com.tripplanner.app.data.google.GoogleApiUsageLimiter
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
@@ -2048,6 +2049,9 @@ private fun PlanNewTripScreen(
     var nextObjectId by rememberSaveable(editingTripId) { mutableLongStateOf(-1L) }
     var saveStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
     var googleFetchStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
+    var googlePlaceSearchQuery by rememberSaveable(editingTripId) { mutableStateOf("") }
+    var googlePlaceSearchStatus by rememberSaveable(editingTripId) { mutableStateOf<String?>(null) }
+    var isSearchingGooglePlaces by remember { mutableStateOf(false) }
     var isFetchingGoogleDetails by remember { mutableStateOf(false) }
     var isLoadingTrip by remember(editingTripId) { mutableStateOf(editingTripId != null) }
     var selectedPoolTripId by rememberSaveable(editingTripId) { mutableStateOf<Long?>(null) }
@@ -2060,6 +2064,9 @@ private fun PlanNewTripScreen(
     val attributeValues = remember(editingTripId) { mutableStateMapOf<TripObjectAttribute, String>() }
     val relatedObjectIds = remember(editingTripId) { mutableStateListOf<Long>() }
     val tripObjects = remember(editingTripId) { mutableStateListOf<TripObjectDraft>() }
+    val googlePlaceSearchResults = remember(editingTripId) {
+        mutableStateListOf<GooglePlaceSearchResult>()
+    }
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
     val activeTrips by database.tripDao()
@@ -2133,6 +2140,9 @@ private fun PlanNewTripScreen(
         attributeValues.clear()
         relatedObjectIds.clear()
         googleFetchStatus = null
+        googlePlaceSearchQuery = ""
+        googlePlaceSearchStatus = null
+        googlePlaceSearchResults.clear()
     }
 
     fun editObject(tripObject: TripObjectDraft) {
@@ -2145,6 +2155,9 @@ private fun PlanNewTripScreen(
         relatedObjectIds.clear()
         relatedObjectIds.addAll(tripObject.relatedObjectIds)
         googleFetchStatus = null
+        googlePlaceSearchQuery = tripObject.name
+        googlePlaceSearchStatus = null
+        googlePlaceSearchResults.clear()
     }
 
     fun applyGooglePlaceDetails(details: GooglePlaceDetails) {
@@ -2186,6 +2199,74 @@ private fun PlanNewTripScreen(
     val canFetchGoogleDetails = selectedObjectType.supportsGooglePlaceDetails() &&
         googlePlaceId.isNotBlank() &&
         !isFetchingGoogleDetails
+
+    fun fetchGoogleDetails(
+        placeId: String,
+        statusPrefix: String = "Google details"
+    ) {
+        coroutineScope.launch {
+            isFetchingGoogleDetails = true
+            googleFetchStatus = null
+            val cachedOnly = !context.isOnline()
+            runCatching {
+                if (cachedOnly) {
+                    googlePlacesRepository.getCachedPlace(placeId)
+                        ?: error("No cached Google details for this place ID")
+                } else if (!canUseOnlineGoogleApis) {
+                    error("Link Google on the main screen before using online Google Places")
+                } else {
+                    googlePlacesRepository.fetchAndCachePlace(placeId)
+                }
+            }.onSuccess { details ->
+                applyGooglePlaceDetails(details)
+                googleFetchStatus = if (cachedOnly) {
+                    "Cached Google details applied"
+                } else {
+                    "$statusPrefix saved locally"
+                }
+            }.onFailure { error ->
+                googleFetchStatus = error.message ?: "Google details unavailable"
+            }
+            isFetchingGoogleDetails = false
+        }
+    }
+
+    fun searchGooglePlaces() {
+        coroutineScope.launch {
+            isSearchingGooglePlaces = true
+            googlePlaceSearchStatus = null
+            googlePlaceSearchResults.clear()
+            runCatching {
+                when {
+                    !context.isOnline() -> error("Connect to internet to search Google Places")
+                    !canUseOnlineGoogleApis -> error("Link Google on the main screen before using online Google Places")
+                    else -> googlePlacesRepository.searchPlaces(googlePlaceSearchQuery)
+                }
+            }.onSuccess { results ->
+                googlePlaceSearchResults.addAll(results)
+                googlePlaceSearchStatus = if (results.isEmpty()) {
+                    "No Google Places results"
+                } else {
+                    "${results.size} Google Places results"
+                }
+            }.onFailure { error ->
+                googlePlaceSearchStatus = error.message ?: "Google Places search unavailable"
+            }
+            isSearchingGooglePlaces = false
+        }
+    }
+
+    fun selectGooglePlaceSearchResult(result: GooglePlaceSearchResult) {
+        attributeValues[TripObjectAttribute.GOOGLE_PLACE_ID] = result.placeId
+        if (objectName.isBlank()) {
+            objectName = result.primaryText
+        }
+        googlePlaceSearchStatus = "Selected ${result.primaryText}"
+        fetchGoogleDetails(
+            placeId = result.placeId,
+            statusPrefix = "Selected Google place"
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -2338,7 +2419,14 @@ private fun PlanNewTripScreen(
                         TripObjectType.entries.forEach { type ->
                             FilterChip(
                                 selected = selectedObjectType == type,
-                                onClick = { selectedObjectType = type },
+                                onClick = {
+                                    if (selectedObjectType != type) {
+                                        googleFetchStatus = null
+                                        googlePlaceSearchStatus = null
+                                        googlePlaceSearchResults.clear()
+                                    }
+                                    selectedObjectType = type
+                                },
                                 label = { Text(type.displayName) },
                                 shape = RoundedCornerShape(8.dp)
                             )
@@ -2368,6 +2456,18 @@ private fun PlanNewTripScreen(
                             keyboardType = KeyboardType.Number
                         )
                     )
+                    if (selectedObjectType.supportsGooglePlaceDetails()) {
+                        GooglePlaceSearchPanel(
+                            query = googlePlaceSearchQuery,
+                            onQueryChange = { googlePlaceSearchQuery = it },
+                            results = googlePlaceSearchResults,
+                            status = googlePlaceSearchStatus,
+                            isSearching = isSearchingGooglePlaces,
+                            isFetchingDetails = isFetchingGoogleDetails,
+                            onSearch = ::searchGooglePlaces,
+                            onSelectResult = ::selectGooglePlaceSearchResult
+                        )
+                    }
                     selectedObjectType.attributes.forEach { attribute ->
                         TripAttributeInput(
                             attribute = attribute,
@@ -2381,31 +2481,7 @@ private fun PlanNewTripScreen(
                                 .fillMaxWidth()
                                 .height(48.dp),
                             onClick = {
-                                coroutineScope.launch {
-                                    isFetchingGoogleDetails = true
-                                    googleFetchStatus = null
-                                    val cachedOnly = !context.isOnline()
-                                    runCatching {
-                                        if (cachedOnly) {
-                                            googlePlacesRepository.getCachedPlace(googlePlaceId)
-                                                ?: error("No cached Google details for this place ID")
-                                        } else if (!canUseOnlineGoogleApis) {
-                                            error("Link Google on the main screen before using online Google Places")
-                                        } else {
-                                            googlePlacesRepository.fetchAndCachePlace(googlePlaceId)
-                                        }
-                                    }.onSuccess { details ->
-                                        applyGooglePlaceDetails(details)
-                                        googleFetchStatus = if (cachedOnly) {
-                                            "Cached Google details applied"
-                                        } else {
-                                            "Google details fetched"
-                                        }
-                                    }.onFailure { error ->
-                                        googleFetchStatus = error.message ?: "Google details unavailable"
-                                    }
-                                    isFetchingGoogleDetails = false
-                                }
+                                fetchGoogleDetails(placeId = googlePlaceId)
                             },
                             enabled = canFetchGoogleDetails,
                             shape = RoundedCornerShape(8.dp)
@@ -2917,6 +2993,100 @@ private fun BookingSummaryRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GooglePlaceSearchPanel(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    results: List<GooglePlaceSearchResult>,
+    status: String?,
+    isSearching: Boolean,
+    isFetchingDetails: Boolean,
+    onSearch: () -> Unit,
+    onSelectResult: (GooglePlaceSearchResult) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Google Places search",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = query,
+            onValueChange = onQueryChange,
+            label = { Text("Search by name, address, or category") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Words
+            )
+        )
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            onClick = onSearch,
+            enabled = query.isNotBlank() && !isSearching && !isFetchingDetails,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(if (isSearching) "Searching Google Places" else "Search Google Places")
+        }
+        status?.let { currentStatus ->
+            Text(
+                text = currentStatus,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        results.forEach { result ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = result.primaryText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    result.secondaryText?.let { secondaryText ->
+                        Text(
+                            text = secondaryText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = { onSelectResult(result) },
+                    enabled = !isFetchingDetails
+                ) {
+                    Text(if (isFetchingDetails) "Saving" else "Select")
+                }
+            }
+        }
     }
 }
 
