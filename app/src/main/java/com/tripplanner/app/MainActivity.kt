@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -1150,6 +1151,9 @@ private fun UseExistingTripScreen(
                     googleApiBlockedReason = "Link Google on the main screen to render the live map. Saved map details remain available offline."
                 )
                 BookingsPanel(tripObjects = selectedTripObjects)
+                TravelItineraryPanel(tripObjects = selectedTripObjects)
+                TransportationBoardPanel(tripObjects = selectedTripObjects)
+                TravelEssentialsPanel(tripObjects = selectedTripObjects)
                 PrivateMapPresetPanel(
                     tripObjects = selectedTripObjects,
                     isSavedTrip = true,
@@ -2733,6 +2737,426 @@ private fun tripDateRange(trip: TripEntity): String {
         startDate = trip.startDate,
         endDate = trip.endDate
     )
+}
+
+@Composable
+private fun TravelItineraryPanel(
+    tripObjects: List<TripObjectDraft>,
+    modifier: Modifier = Modifier
+) {
+    val itineraryItems = tripObjects
+        .filter { it.type != TripObjectType.FAMILY_MEMBER }
+        .sortedWith(
+            compareBy<TripObjectDraft> { it.timelineSortKey() }
+                .thenBy { it.priorityOrder }
+        )
+
+    TravelSectionCard(
+        title = "Itinerary",
+        subtitle = if (itineraryItems.isEmpty()) "No planned items yet" else "${itineraryItems.size} planned stops",
+        modifier = modifier
+    ) {
+        if (itineraryItems.isEmpty()) {
+            EmptySectionText("Add transportation, hotels, food, or attractions to build the travel timeline.")
+        } else {
+            itineraryItems.forEach { tripObject ->
+                ItineraryTimelineRow(tripObject = tripObject)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItineraryTimelineRow(
+    tripObject: TripObjectDraft
+) {
+    val accent = accentForTripObjectType(tripObject.type)
+    val timeLabel = tripObject.timelineDateTime()?.ifBlank { null } ?: "#${tripObject.priorityOrder}"
+    val detail = tripObject.travelSummary()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(min = 72.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(accent.copy(alpha = 0.14f))
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = timeLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = accent,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = tripObject.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = tripObject.type.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                color = accent,
+                fontWeight = FontWeight.SemiBold
+            )
+            detail?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransportationBoardPanel(
+    tripObjects: List<TripObjectDraft>,
+    modifier: Modifier = Modifier
+) {
+    val transportationItems = tripObjects
+        .filter { it.type == TripObjectType.TRANSPORTATION }
+        .sortedWith(
+            compareBy<TripObjectDraft> {
+                it.attributes[TripObjectAttribute.DEPARTURE_DATE_TIME].orEmpty().ifBlank { "9999" }
+            }.thenBy { it.priorityOrder }
+        )
+
+    TravelSectionCard(
+        title = "Transportation board",
+        subtitle = if (transportationItems.isEmpty()) "No legs yet" else "${transportationItems.size} legs",
+        modifier = modifier
+    ) {
+        if (transportationItems.isEmpty()) {
+            EmptySectionText("Add flights, trains, cars, taxis, walking legs, or other transport to see them here.")
+        } else {
+            transportationItems.forEach { tripObject ->
+                TransportationLegCard(tripObject = tripObject)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransportationLegCard(
+    tripObject: TripObjectDraft
+) {
+    val attributes = tripObject.attributes
+    val mode = attributes[TripObjectAttribute.TRANSPORTATION_MODE]
+    val provider = attributes[TripObjectAttribute.TRANSPORT_PROVIDER]
+    val service = attributes[TripObjectAttribute.TRANSPORT_SERVICE_NUMBER]
+    val departure = attributes[TripObjectAttribute.DEPARTURE_LOCATION]
+    val departureTime = attributes[TripObjectAttribute.DEPARTURE_DATE_TIME]
+    val arrival = attributes[TripObjectAttribute.ARRIVAL_LOCATION]
+    val arrivalTime = attributes[TripObjectAttribute.ARRIVAL_DATE_TIME]
+    val price = attributes[TripObjectAttribute.PRICE]
+    val duration = attributes[TripObjectAttribute.DURATION]
+    val ticket = attributes[TripObjectAttribute.BOOKING_REFERENCE]
+        ?: attributes[TripObjectAttribute.TICKET_NUMBER]
+    val terminal = listOfNotNull(
+        attributes[TripObjectAttribute.DEPARTURE_TERMINAL],
+        attributes[TripObjectAttribute.DEPARTURE_GATE]
+    ).joinToString(" / ").ifBlank { null }
+    val seat = attributes[TripObjectAttribute.SEAT_ASSIGNMENT]
+    val baggage = attributes[TripObjectAttribute.BAGGAGE_DETAILS]
+    val disruption = attributes[TripObjectAttribute.DISRUPTION_NOTES]
+    val transfer = attributes[TripObjectAttribute.TRANSFER_INSTRUCTIONS]
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF00A6A6).copy(alpha = 0.10f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = tripObject.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = listOfNotNull(mode, provider, service).joinToString(" - ").ifBlank { "Transportation" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            ticket?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF00A6A6),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        TravelDetailLine(label = "Depart", value = listOfNotNull(departureTime, departure).joinToString(" - "))
+        TravelDetailLine(label = "Arrive", value = listOfNotNull(arrivalTime, arrival).joinToString(" - "))
+        TravelDetailLine(label = "Terminal", value = terminal)
+        TravelDetailLine(label = "Seat", value = seat)
+        TravelDetailLine(label = "Baggage", value = baggage)
+        TravelDetailLine(label = "Price", value = listOfNotNull(price, duration).joinToString(" - "))
+        TravelDetailLine(label = "Transfer", value = transfer)
+        TravelDetailLine(label = "Status", value = disruption)
+    }
+}
+
+@Composable
+private fun TravelEssentialsPanel(
+    tripObjects: List<TripObjectDraft>,
+    modifier: Modifier = Modifier
+) {
+    val familyMembers = tripObjects
+        .filter { it.type == TripObjectType.FAMILY_MEMBER }
+        .sortedBy { it.priorityOrder }
+    val hotels = tripObjects
+        .filter { it.type == TripObjectType.HOTEL }
+        .sortedWith(compareBy<TripObjectDraft> {
+            it.attributes[TripObjectAttribute.CHECK_IN].orEmpty().ifBlank { "9999" }
+        }.thenBy { it.priorityOrder })
+    val ticketedAttractions = tripObjects
+        .filter { it.type == TripObjectType.PAID_ATTRACTION }
+        .sortedWith(compareBy<TripObjectDraft> {
+            it.attributes[TripObjectAttribute.PLANNED_VISIT_DATE_TIME].orEmpty().ifBlank { "9999" }
+        }.thenBy { it.priorityOrder })
+
+    TravelSectionCard(
+        title = "Travel essentials",
+        subtitle = "${familyMembers.size} travellers, ${hotels.size} hotels, ${ticketedAttractions.size} paid attractions",
+        modifier = modifier
+    ) {
+        if (familyMembers.isEmpty() && hotels.isEmpty() && ticketedAttractions.isEmpty()) {
+            EmptySectionText("Add travellers, hotels, and ticketed attractions to keep essentials available offline.")
+        }
+        familyMembers.take(6).forEach { member ->
+            EssentialRow(
+                accent = accentForTripObjectType(member.type),
+                title = member.name,
+                subtitle = listOfNotNull(
+                    member.attributes[TripObjectAttribute.RELATION],
+                    member.attributes[TripObjectAttribute.AGE]?.let { "Age $it" },
+                    member.attributes[TripObjectAttribute.PASSPORT_NUMBER]?.let { "Passport $it" }
+                ).joinToString(" - ")
+            )
+        }
+        hotels.forEach { hotel ->
+            EssentialRow(
+                accent = accentForTripObjectType(hotel.type),
+                title = hotel.name,
+                subtitle = listOfNotNull(
+                    hotel.attributes[TripObjectAttribute.CHECK_IN]?.let { "In $it" },
+                    hotel.attributes[TripObjectAttribute.CHECK_OUT]?.let { "Out $it" },
+                    hotel.attributes[TripObjectAttribute.ROOM_NUMBER]?.let { "Room $it" },
+                    hotel.attributes[TripObjectAttribute.ADDRESS]
+                ).joinToString(" - ")
+            )
+        }
+        ticketedAttractions.forEach { attraction ->
+            EssentialRow(
+                accent = accentForTripObjectType(attraction.type),
+                title = attraction.name,
+                subtitle = listOfNotNull(
+                    attraction.attributes[TripObjectAttribute.PLANNED_VISIT_DATE_TIME],
+                    attraction.attributes[TripObjectAttribute.TICKET_PRICES]
+                ).joinToString(" - ")
+            )
+        }
+    }
+}
+
+@Composable
+private fun TravelSectionCard(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+private fun EmptySectionText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun EssentialRow(
+    accent: Color,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(accent),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = title.firstOrNull()?.uppercase() ?: "?",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TravelDetailLine(
+    label: String,
+    value: String?
+) {
+    if (value.isNullOrBlank()) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            modifier = Modifier.width(74.dp),
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            modifier = Modifier.weight(1f),
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun TripObjectDraft.timelineDateTime(): String? {
+    return when (type) {
+        TripObjectType.TRANSPORTATION -> attributes[TripObjectAttribute.DEPARTURE_DATE_TIME]
+        TripObjectType.HOTEL -> attributes[TripObjectAttribute.CHECK_IN]
+        TripObjectType.PAID_ATTRACTION,
+        TripObjectType.FREE_ATTRACTION -> attributes[TripObjectAttribute.PLANNED_VISIT_DATE_TIME]
+        else -> null
+    }?.takeIf { it.isNotBlank() }
+}
+
+private fun TripObjectDraft.timelineSortKey(): String {
+    return timelineDateTime() ?: "9999-${priorityOrder.toString().padStart(6, '0')}"
+}
+
+private fun TripObjectDraft.travelSummary(): String? {
+    return when (type) {
+        TripObjectType.TRANSPORTATION -> {
+            val departure = attributes[TripObjectAttribute.DEPARTURE_LOCATION]
+            val arrival = attributes[TripObjectAttribute.ARRIVAL_LOCATION]
+            listOfNotNull(departure, arrival).joinToString(" -> ").ifBlank { null }
+        }
+        TripObjectType.HOTEL -> listOfNotNull(
+            attributes[TripObjectAttribute.ADDRESS],
+            attributes[TripObjectAttribute.ROOM_NUMBER]?.let { "Room $it" }
+        ).joinToString(" - ").ifBlank { null }
+        TripObjectType.FOOD_PLACE -> listOfNotNull(
+            attributes[TripObjectAttribute.FOOD_TYPE],
+            attributes[TripObjectAttribute.ADDRESS]
+        ).joinToString(" - ").ifBlank { null }
+        TripObjectType.PAID_ATTRACTION,
+        TripObjectType.FREE_ATTRACTION -> listOfNotNull(
+            attributes[TripObjectAttribute.DESCRIPTION],
+            attributes[TripObjectAttribute.ADDRESS]
+        ).joinToString(" - ").ifBlank { null }
+        TripObjectType.SHOP -> listOfNotNull(
+            attributes[TripObjectAttribute.CATEGORY],
+            attributes[TripObjectAttribute.ADDRESS]
+        ).joinToString(" - ").ifBlank { null }
+        TripObjectType.FAMILY_MEMBER -> null
+    }
 }
 
 @Composable
