@@ -269,25 +269,74 @@ class TripBackupRepository(
             price: String,
             stopsLocations: String,
             routeMap: String,
-            relatedObjectIds: Set<Long>
+            relatedObjectIds: Set<Long>,
+            provider: String = "",
+            serviceNumber: String = "",
+            bookingReference: String = "",
+            ticketNumber: String = "",
+            departureTerminal: String = "",
+            departureGate: String = "",
+            arrivalTerminal: String = "",
+            seatAssignment: String = "",
+            baggageDetails: String = "",
+            duration: String = "",
+            distance: String = "",
+            transferInstructions: String = "",
+            ticketUrl: String = "",
+            checkInUrl: String = "",
+            liveStatusUrl: String = "",
+            scheduleUrl: String = "",
+            phoneNumber: String = "",
+            emailAddress: String = "",
+            disruptionNotes: String = "",
+            notes: String = ""
         ): Long {
+            val attributes = mutableMapOf(
+                TripObjectAttribute.TRANSPORTATION_MODE to mode,
+                TripObjectAttribute.DEPARTURE_LOCATION to departureLocation,
+                TripObjectAttribute.DEPARTURE_LATITUDE to departureLatitude,
+                TripObjectAttribute.DEPARTURE_LONGITUDE to departureLongitude,
+                TripObjectAttribute.DEPARTURE_DATE_TIME to departureDateTime,
+                TripObjectAttribute.ARRIVAL_LOCATION to arrivalLocation,
+                TripObjectAttribute.ARRIVAL_LATITUDE to arrivalLatitude,
+                TripObjectAttribute.ARRIVAL_LONGITUDE to arrivalLongitude,
+                TripObjectAttribute.ARRIVAL_DATE_TIME to arrivalDateTime,
+                TripObjectAttribute.PRICE to price,
+                TripObjectAttribute.STOPS_LOCATIONS to stopsLocations,
+                TripObjectAttribute.ROUTE_MAP to routeMap
+            )
+
+            fun putIfPresent(attribute: TripObjectAttribute, value: String) {
+                if (value.isNotBlank()) {
+                    attributes[attribute] = value
+                }
+            }
+
+            putIfPresent(TripObjectAttribute.TRANSPORT_PROVIDER, provider)
+            putIfPresent(TripObjectAttribute.TRANSPORT_SERVICE_NUMBER, serviceNumber)
+            putIfPresent(TripObjectAttribute.BOOKING_REFERENCE, bookingReference)
+            putIfPresent(TripObjectAttribute.TICKET_NUMBER, ticketNumber)
+            putIfPresent(TripObjectAttribute.DEPARTURE_TERMINAL, departureTerminal)
+            putIfPresent(TripObjectAttribute.DEPARTURE_GATE, departureGate)
+            putIfPresent(TripObjectAttribute.ARRIVAL_TERMINAL, arrivalTerminal)
+            putIfPresent(TripObjectAttribute.SEAT_ASSIGNMENT, seatAssignment)
+            putIfPresent(TripObjectAttribute.BAGGAGE_DETAILS, baggageDetails)
+            putIfPresent(TripObjectAttribute.DURATION, duration)
+            putIfPresent(TripObjectAttribute.DISTANCE, distance)
+            putIfPresent(TripObjectAttribute.TRANSFER_INSTRUCTIONS, transferInstructions)
+            putIfPresent(TripObjectAttribute.TICKET_URL, ticketUrl)
+            putIfPresent(TripObjectAttribute.CHECK_IN_URL, checkInUrl)
+            putIfPresent(TripObjectAttribute.LIVE_STATUS_URL, liveStatusUrl)
+            putIfPresent(TripObjectAttribute.SCHEDULE_URL, scheduleUrl)
+            putIfPresent(TripObjectAttribute.PHONE_NUMBER, phoneNumber)
+            putIfPresent(TripObjectAttribute.EMAIL_ADDRESS, emailAddress)
+            putIfPresent(TripObjectAttribute.DISRUPTION_NOTES, disruptionNotes)
+            putIfPresent(TripObjectAttribute.NOTES, notes)
+
             return addObject(
                 type = TripObjectType.TRANSPORTATION,
                 name = name,
-                attributes = mapOf(
-                    TripObjectAttribute.TRANSPORTATION_MODE to mode,
-                    TripObjectAttribute.DEPARTURE_LOCATION to departureLocation,
-                    TripObjectAttribute.DEPARTURE_LATITUDE to departureLatitude,
-                    TripObjectAttribute.DEPARTURE_LONGITUDE to departureLongitude,
-                    TripObjectAttribute.DEPARTURE_DATE_TIME to departureDateTime,
-                    TripObjectAttribute.ARRIVAL_LOCATION to arrivalLocation,
-                    TripObjectAttribute.ARRIVAL_LATITUDE to arrivalLatitude,
-                    TripObjectAttribute.ARRIVAL_LONGITUDE to arrivalLongitude,
-                    TripObjectAttribute.ARRIVAL_DATE_TIME to arrivalDateTime,
-                    TripObjectAttribute.PRICE to price,
-                    TripObjectAttribute.STOPS_LOCATIONS to stopsLocations,
-                    TripObjectAttribute.ROUTE_MAP to routeMap
-                ),
+                attributes = attributes,
                 relatedObjectIds = relatedObjectIds
             )
         }
@@ -407,7 +456,26 @@ class TripBackupRepository(
             price = "1800 GBP total",
             stopsLocations = "Direct flight",
             routeMap = "https://maps.google.com/?q=TLV+to+LHR",
-            relatedObjectIds = familyIds
+            relatedObjectIds = familyIds,
+            provider = "Mock Airways",
+            serviceNumber = "MA 401",
+            bookingReference = "TP-ENG-FLT-OUT",
+            ticketNumber = "016-000401-MOCK",
+            departureTerminal = "Terminal 3",
+            departureGate = "Gate B8",
+            arrivalTerminal = "Terminal 2",
+            seatAssignment = "Seats 18A-18D",
+            baggageDetails = "4 checked bags, 4 cabin bags. Keep passports and chargers in carry-on.",
+            duration = "5h 35m",
+            distance = "3,580 km",
+            transferInstructions = "Arrive at TLV 3 hours before departure. Use family security lane if open.",
+            ticketUrl = "https://example.com/bookings/tp-eng-flight-out",
+            checkInUrl = "https://example.com/check-in/mock-airways",
+            liveStatusUrl = "https://example.com/status/ma401",
+            scheduleUrl = "https://example.com/schedule/tlv-lhr",
+            phoneNumber = "+972 3 000 0401",
+            emailAddress = "support@mockairways.example",
+            notes = "Download boarding passes before leaving home."
         )
 
         val londonHotelId = addHotel(
@@ -438,7 +506,12 @@ class TripBackupRepository(
             price = "Free",
             stopsLocations = "London Eye, Westminster Bridge, South Bank",
             routeMap = "https://maps.google.com/?q=London+South+Bank+walking+route",
-            relatedObjectIds = familyAnd(londonHotelId)
+            relatedObjectIds = familyAnd(londonHotelId),
+            provider = "Self guided",
+            duration = "2h",
+            distance = "3.2 km",
+            transferInstructions = "Use the riverside path and keep the hotel address pinned offline.",
+            notes = "Good first-day walk if everyone is awake after the flight."
         )
         val londonTowerId = addAttraction(
             name = "Tower of London",
@@ -522,7 +595,22 @@ class TripBackupRepository(
             price = "96 GBP total",
             stopsLocations = "Reading",
             routeMap = "https://maps.google.com/?q=London+Paddington+to+Oxford+Station",
-            relatedObjectIds = familyAnd(londonHotelId)
+            relatedObjectIds = familyAnd(londonHotelId),
+            provider = "Great Western Railway",
+            serviceNumber = "GWR 1W23",
+            bookingReference = "TP-ENG-GWR-OXF",
+            ticketNumber = "GWR-MOCK-0320",
+            departureTerminal = "Platform 10",
+            arrivalTerminal = "Platform 3",
+            seatAssignment = "Coach C, seats 42-45",
+            baggageDetails = "Keep suitcases together near Coach C luggage rack.",
+            duration = "55m",
+            distance = "86 km",
+            transferInstructions = "Use the Elizabeth line entrance if arriving from central London.",
+            ticketUrl = "https://example.com/bookings/gwr-oxford",
+            liveStatusUrl = "https://example.com/status/gwr-1w23",
+            scheduleUrl = "https://example.com/schedule/paddington-oxford",
+            notes = "Buy snacks before boarding; family seats are together."
         )
         val oxfordHotelId = addHotel(
             name = "Mock Oxford Riverside Hotel",
@@ -552,7 +640,19 @@ class TripBackupRepository(
             price = "44 GBP bike rental",
             stopsLocations = "Radcliffe Camera, High Street, Botanic Garden",
             routeMap = "https://maps.google.com/?q=Oxford+bicycle+route",
-            relatedObjectIds = familyAnd(oxfordHotelId)
+            relatedObjectIds = familyAnd(oxfordHotelId),
+            provider = "Mock Oxford Cycle Hire",
+            bookingReference = "TP-ENG-BIKE-OXF",
+            ticketNumber = "BIKE-044",
+            departureTerminal = "Hotel reception pickup",
+            seatAssignment = "2 adult bikes, 2 child bikes, helmets included",
+            baggageDetails = "Carry only small day bags.",
+            duration = "30m riding plus stops",
+            distance = "4.5 km",
+            transferInstructions = "Check brakes before leaving and walk bikes through crowded streets.",
+            ticketUrl = "https://example.com/bookings/oxford-bikes",
+            phoneNumber = "+44 1865 000444",
+            notes = "Skip cycling if it rains heavily."
         )
         val bodleianId = addAttraction(
             name = "Bodleian Library",
@@ -636,7 +736,22 @@ class TripBackupRepository(
             price = "130 GBP car day plus fuel",
             stopsLocations = "Cotswolds viewpoint, Chippenham",
             routeMap = "https://maps.google.com/?q=Oxford+to+Bath",
-            relatedObjectIds = familyAnd(oxfordHotelId)
+            relatedObjectIds = familyAnd(oxfordHotelId),
+            provider = "MockDrive Rentals",
+            bookingReference = "TP-ENG-CAR-BATH",
+            ticketNumber = "CAR-UK-5512",
+            departureTerminal = "Oxford Station rental desk",
+            arrivalTerminal = "Bath city centre parking",
+            seatAssignment = "Automatic family car, plate MCK-5512",
+            baggageDetails = "All bags fit in boot; keep raincoats accessible.",
+            duration = "2h 15m",
+            distance = "116 km",
+            transferInstructions = "Inspect car, photograph fuel gauge, set Bath parking lot as offline destination.",
+            ticketUrl = "https://example.com/bookings/mockdrive-5512",
+            liveStatusUrl = "https://example.com/road-status/oxford-bath",
+            phoneNumber = "+44 800 000 5512",
+            emailAddress = "rentals@example.com",
+            notes = "Return with full tank."
         )
         val bathHotelId = addHotel(
             name = "Mock Bath Georgian Hotel",
@@ -666,7 +781,18 @@ class TripBackupRepository(
             price = "18 GBP family pass",
             stopsLocations = "Bath Abbey, Pulteney Bridge, Royal Crescent",
             routeMap = "https://maps.google.com/?q=Bath+city+bus",
-            relatedObjectIds = familyAnd(bathHotelId)
+            relatedObjectIds = familyAnd(bathHotelId),
+            provider = "Bath City Bus",
+            serviceNumber = "Route 1",
+            ticketNumber = "BUS-FAMILY-18",
+            departureTerminal = "Queen Square stop C",
+            arrivalTerminal = "Royal Crescent stop",
+            duration = "15m",
+            distance = "2.1 km",
+            transferInstructions = "Validate family day ticket on first boarding and keep paper receipt.",
+            ticketUrl = "https://example.com/tickets/bath-day-pass",
+            scheduleUrl = "https://example.com/schedule/bath-route-1",
+            notes = "Works all day for city bus hops."
         )
         val romanBathsId = addAttraction(
             name = "Roman Baths",
@@ -749,7 +875,22 @@ class TripBackupRepository(
             price = "210 GBP total",
             stopsLocations = "Bristol Temple Meads, Birmingham New Street",
             routeMap = "https://maps.google.com/?q=Bath+Spa+to+York+Station",
-            relatedObjectIds = familyAnd(bathHotelId)
+            relatedObjectIds = familyAnd(bathHotelId),
+            provider = "CrossCountry",
+            serviceNumber = "XC 0850",
+            bookingReference = "TP-ENG-XC-YORK",
+            ticketNumber = "XC-MOCK-0730",
+            departureTerminal = "Platform 2",
+            arrivalTerminal = "Platform 5",
+            seatAssignment = "Coach B, seats 21-24",
+            baggageDetails = "Large suitcases near Coach B vestibule.",
+            duration = "4h 45m",
+            distance = "352 km",
+            transferInstructions = "Board early at Bath Spa; keep lunch packed for the long leg.",
+            ticketUrl = "https://example.com/bookings/crosscountry-york",
+            liveStatusUrl = "https://example.com/status/xc0850",
+            scheduleUrl = "https://example.com/schedule/bath-york",
+            notes = "Longest train leg of the trip."
         )
         val yorkTaxiId = addTransport(
             name = "Taxi York station to hotel",
@@ -765,7 +906,17 @@ class TripBackupRepository(
             price = "16 GBP",
             stopsLocations = "Direct",
             routeMap = "https://maps.google.com/?q=York+Station+to+York+Minster",
-            relatedObjectIds = familyAnd(trainToYorkId)
+            relatedObjectIds = familyAnd(trainToYorkId),
+            provider = "Mock York Taxi",
+            bookingReference = "TP-ENG-TAXI-YORK",
+            departureTerminal = "Station taxi rank",
+            seatAssignment = "Estate taxi for 4 passengers",
+            baggageDetails = "Confirm boot space for 4 suitcases.",
+            duration = "15m",
+            distance = "1.4 km",
+            transferInstructions = "Meet driver at the main taxi rank outside the station.",
+            phoneNumber = "+44 1904 000016",
+            notes = "Call if train is delayed."
         )
         val yorkHotelId = addHotel(
             name = "Mock York Minster Hotel",
@@ -862,7 +1013,22 @@ class TripBackupRepository(
             price = "88 GBP total",
             stopsLocations = "Leeds",
             routeMap = "https://maps.google.com/?q=York+to+Manchester+Piccadilly",
-            relatedObjectIds = familyAnd(yorkHotelId)
+            relatedObjectIds = familyAnd(yorkHotelId),
+            provider = "TransPennine Express",
+            serviceNumber = "TPE 0910",
+            bookingReference = "TP-ENG-TPE-MAN",
+            ticketNumber = "TPE-MOCK-0910",
+            departureTerminal = "Platform 6",
+            arrivalTerminal = "Platform 13",
+            seatAssignment = "Coach D, seats 8-11",
+            baggageDetails = "One overhead bag each, suitcases at coach end.",
+            duration = "1h 35m",
+            distance = "92 km",
+            transferInstructions = "Use the lift at York station if carrying all suitcases.",
+            ticketUrl = "https://example.com/bookings/tpe-manchester",
+            liveStatusUrl = "https://example.com/status/tpe0910",
+            scheduleUrl = "https://example.com/schedule/york-manchester",
+            notes = "Connects to hotel near Piccadilly."
         )
         val manchesterHotelId = addHotel(
             name = "Mock Manchester Piccadilly Hotel",
@@ -892,7 +1058,18 @@ class TripBackupRepository(
             price = "14 GBP family day ticket",
             stopsLocations = "Piccadilly Gardens, New Islington, Etihad Campus",
             routeMap = "https://maps.google.com/?q=Manchester+Metrolink+Piccadilly+to+Etihad+Campus",
-            relatedObjectIds = familyAnd(manchesterHotelId)
+            relatedObjectIds = familyAnd(manchesterHotelId),
+            provider = "Manchester Metrolink",
+            serviceNumber = "Blue line",
+            ticketNumber = "MET-FAMILY-DAY",
+            departureTerminal = "Piccadilly platform B",
+            arrivalTerminal = "Etihad Campus stop",
+            duration = "25m",
+            distance = "3.8 km",
+            transferInstructions = "Tap family day ticket before boarding and keep the ticket active for return.",
+            scheduleUrl = "https://example.com/schedule/metrolink-blue",
+            liveStatusUrl = "https://example.com/status/metrolink",
+            notes = "Avoid peak tram after football events."
         )
         val scienceMuseumId = addAttraction(
             name = "Science and Industry Museum",
@@ -974,7 +1151,26 @@ class TripBackupRepository(
             price = "1760 GBP total",
             stopsLocations = "Direct flight",
             routeMap = "https://maps.google.com/?q=MAN+to+TLV",
-            relatedObjectIds = familyAnd(manchesterHotelId, libraryId)
+            relatedObjectIds = familyAnd(manchesterHotelId, libraryId),
+            provider = "Mock Airways",
+            serviceNumber = "MA 402",
+            bookingReference = "TP-ENG-FLT-RETURN",
+            ticketNumber = "016-000402-MOCK",
+            departureTerminal = "Terminal 1",
+            departureGate = "Gate 12",
+            arrivalTerminal = "Terminal 3",
+            seatAssignment = "Seats 19A-19D",
+            baggageDetails = "4 checked bags. Keep UK receipts and passports in carry-on.",
+            duration = "5h",
+            distance = "3,760 km",
+            transferInstructions = "Leave Manchester hotel no later than 14:15 for airport transfer.",
+            ticketUrl = "https://example.com/bookings/tp-eng-flight-return",
+            checkInUrl = "https://example.com/check-in/mock-airways",
+            liveStatusUrl = "https://example.com/status/ma402",
+            scheduleUrl = "https://example.com/schedule/man-tlv",
+            phoneNumber = "+44 800 000 0402",
+            emailAddress = "support@mockairways.example",
+            notes = "Trip ends after overnight arrival at Ben Gurion."
         )
 
         return objects

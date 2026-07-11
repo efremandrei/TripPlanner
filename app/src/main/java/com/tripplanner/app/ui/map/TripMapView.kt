@@ -25,6 +25,8 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
 import com.tripplanner.app.BuildConfig
+import com.tripplanner.app.data.google.GoogleApiSku
+import com.tripplanner.app.data.google.GoogleApiUsageLimiter
 import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectDraft
 import com.tripplanner.app.model.TripObjectType
@@ -33,19 +35,36 @@ import com.tripplanner.app.util.isOnline
 @Composable
 fun TripMapView(
     tripObjects: List<TripObjectDraft>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isGoogleApiAllowed: Boolean = true,
+    googleApiBlockedReason: String = "Link a Google account to render the live map."
 ) {
     val context = LocalContext.current
     val mapItems = remember(tripObjects) { tripObjects.toMapItems() }
-    val canRenderLiveMap = BuildConfig.MAPS_API_KEY.isNotBlank() && context.isOnline()
+    val usageLimiter = remember(context) { GoogleApiUsageLimiter(context.applicationContext) }
+    val canAttemptLiveMap = BuildConfig.MAPS_API_KEY.isNotBlank() &&
+        context.isOnline() &&
+        isGoogleApiAllowed
+    val usageDecision = remember(mapItems, canAttemptLiveMap) {
+        if (canAttemptLiveMap) {
+            usageLimiter.tryConsume(GoogleApiSku.DYNAMIC_MAPS)
+        } else {
+            null
+        }
+    }
+    val canRenderLiveMap = canAttemptLiveMap && usageDecision?.allowed == true
 
     if (!canRenderLiveMap) {
         OfflineMapFallback(
             mapItems = mapItems,
-            reason = if (BuildConfig.MAPS_API_KEY.isBlank()) {
-                "Add MAPS_API_KEY to local.properties to render the live map."
-            } else {
-                "Offline mode is using locally saved map details."
+            reason = when {
+                BuildConfig.MAPS_API_KEY.isBlank() -> {
+                    "Add MAPS_API_KEY to local.properties to render the live map."
+                }
+                !isGoogleApiAllowed -> googleApiBlockedReason
+                !context.isOnline() -> "Offline mode is using locally saved map details."
+                usageDecision?.allowed == false -> usageDecision.message
+                else -> "Offline mode is using locally saved map details."
             },
             modifier = modifier
         )

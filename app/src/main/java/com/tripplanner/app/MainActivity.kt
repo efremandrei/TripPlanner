@@ -96,7 +96,9 @@ import com.tripplanner.app.data.auth.AuthProvider
 import com.tripplanner.app.data.auth.AuthOperationResult
 import com.tripplanner.app.data.auth.AuthSession
 import com.tripplanner.app.data.backup.TripBackupRepository
+import com.tripplanner.app.data.google.GoogleApiSku
 import com.tripplanner.app.data.google.GooglePlaceDetails
+import com.tripplanner.app.data.google.GoogleApiUsageLimiter
 import com.tripplanner.app.data.google.GooglePlacesRepository
 import com.tripplanner.app.data.TripRepository
 import com.tripplanner.app.data.local.entity.PoolItemEntity
@@ -143,14 +145,14 @@ private enum class AuthMode {
     CreateAccount
 }
 
-private suspend fun signInWithGoogleAccount(
+private suspend fun linkGoogleAccount(
     activity: Activity,
     authRepository: AuthRepository
 ): AuthOperationResult {
     val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID.trim()
     if (webClientId.isBlank()) {
         return AuthOperationResult(
-            errorMessage = "Google sign-in is not configured in this APK. Rebuild with GOOGLE_WEB_CLIENT_ID."
+            errorMessage = "Google linking is not configured in this APK. Rebuild with GOOGLE_WEB_CLIENT_ID."
         )
     }
 
@@ -180,10 +182,10 @@ private suspend fun signInWithGoogleAccount(
         } catch (_: NoCredentialException) {
             AuthOperationResult(errorMessage = "No Google account is available on this device")
         } catch (error: GetCredentialException) {
-            AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
+            AuthOperationResult(errorMessage = error.message ?: "Google linking was cancelled or unavailable")
         }
     } catch (error: GetCredentialException) {
-        AuthOperationResult(errorMessage = error.message ?: "Google sign-in was cancelled or unavailable")
+        AuthOperationResult(errorMessage = error.message ?: "Google linking was cancelled or unavailable")
     }
 }
 
@@ -219,7 +221,7 @@ private suspend fun requestGoogleCredential(
 
     return try {
         val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-        authRepository.signInGoogle(
+        authRepository.linkGoogleAccount(
             accountId = googleCredential.id,
             displayName = googleCredential.displayName ?: googleCredential.id
         )
@@ -268,7 +270,7 @@ private fun TripPlannerApp() {
     fun signOut() {
         val session = authSession
         val hostActivity = activity
-        if (session?.provider == AuthProvider.GOOGLE && hostActivity != null) {
+        if (session?.hasLinkedGoogleAccount == true && hostActivity != null) {
             appCoroutineScope.launch {
                 runCatching { clearGoogleCredentialState(hostActivity) }
             }
@@ -304,19 +306,6 @@ private fun TripPlannerApp() {
                 AuthScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
-                    onGoogleSignIn = {
-                        val hostActivity = activity
-                        if (hostActivity == null) {
-                            "Google sign-in needs an active activity"
-                        } else {
-                            signInWithGoogleAccount(
-                                activity = hostActivity,
-                                authRepository = authRepository
-                            ).also { result ->
-                                result.session?.let { authSession = it }
-                            }.errorMessage
-                        }
-                    },
                     onLocalSignIn = { accountName, password ->
                         authRepository.signInLocal(
                             accountName = accountName,
@@ -340,6 +329,30 @@ private fun TripPlannerApp() {
                         authSession = session,
                         appSkin = appSkin,
                         onAppSkinChange = { appSkin = it },
+                        onLinkGoogleAccount = {
+                            val hostActivity = activity
+                            if (hostActivity == null) {
+                                "Google linking needs an active activity"
+                            } else {
+                                linkGoogleAccount(
+                                    activity = hostActivity,
+                                    authRepository = authRepository
+                                ).also { result ->
+                                    result.session?.let { authSession = it }
+                                }.errorMessage
+                            }
+                        },
+                        onUnlinkGoogleAccount = {
+                            val hostActivity = activity
+                            if (hostActivity != null) {
+                                appCoroutineScope.launch {
+                                    runCatching { clearGoogleCredentialState(hostActivity) }
+                                }
+                            }
+                            authRepository.unlinkGoogleAccount().also { result ->
+                                result.session?.let { authSession = it }
+                            }.errorMessage
+                        },
                         onSignOut = ::signOut,
                         onManageTrips = { screen = Screen.TripManagement },
                         onUseExistingTrip = { screen = Screen.UseExistingTrip }
@@ -410,6 +423,8 @@ private fun MainMenuScreen(
     authSession: AuthSession,
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onLinkGoogleAccount: suspend () -> String?,
+    onUnlinkGoogleAccount: () -> String?,
     onSignOut: () -> Unit,
     onManageTrips: () -> Unit,
     onUseExistingTrip: () -> Unit
@@ -425,6 +440,7 @@ private fun MainMenuScreen(
     }
     val coroutineScope = rememberCoroutineScope()
     var databaseStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var googleLinkStatus by rememberSaveable { mutableStateOf<String?>(null) }
     val exportWholeDbLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? ->
@@ -469,7 +485,21 @@ private fun MainMenuScreen(
         ) {
             AppHeaderBar(
                 displayName = authSession.displayName,
+                linkedGoogleDisplayName = authSession.linkedGoogleDisplayName,
                 onSignOut = onSignOut
+            )
+            GoogleAccountLinkPanel(
+                authSession = authSession,
+                status = googleLinkStatus,
+                onLinkGoogleAccount = {
+                    coroutineScope.launch {
+                        googleLinkStatus = "Opening Google account link"
+                        googleLinkStatus = onLinkGoogleAccount() ?: "Google account linked"
+                    }
+                },
+                onUnlinkGoogleAccount = {
+                    googleLinkStatus = onUnlinkGoogleAccount() ?: "Google account unlinked"
+                }
             )
             TripHeroPanel(
                 title = "Trip Planner",
@@ -500,6 +530,7 @@ private fun MainMenuScreen(
             )
             DatabaseToolsPanel(
                 status = databaseStatus,
+                showMockTools = BuildConfig.PREPOPULATE_MOCK_DB,
                 onPopulateMockDb = {
                     coroutineScope.launch {
                         databaseStatus = "Populating mock database"
@@ -535,7 +566,6 @@ private fun MainMenuScreen(
 private fun AuthScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
-    onGoogleSignIn: suspend () -> String?,
     onLocalSignIn: (String, String) -> String?,
     onCreateAccount: (String, String) -> String?
 ) {
@@ -543,10 +573,9 @@ private fun AuthScreen(
     var accountName by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var authStatus by rememberSaveable { mutableStateOf<String?>(null) }
-    val coroutineScope = rememberCoroutineScope()
     val isGoogleSignInConfigured = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
     val googleSignInSubtitle = if (isGoogleSignInConfigured) {
-        "Use this device's Google account"
+        "Link Google after local login for online planning"
     } else {
         "Rebuild with GOOGLE_WEB_CLIENT_ID"
     }
@@ -571,17 +600,27 @@ private fun AuthScreen(
                 selectedSkin = appSkin,
                 onSkinSelected = onAppSkinChange
             )
-            HomeActionCard(
-                title = "Log in with Google account",
-                subtitle = googleSignInSubtitle,
-                accent = Color(0xFF4F7CAC),
-                onClick = {
-                    coroutineScope.launch {
-                        authStatus = "Opening Google sign-in"
-                        authStatus = onGoogleSignIn() ?: "Google account signed in"
-                    }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Google account optional",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = googleSignInSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
+            }
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -683,6 +722,7 @@ private fun AuthScreen(
 @Composable
 private fun DatabaseToolsPanel(
     status: String?,
+    showMockTools: Boolean,
     onPopulateMockDb: () -> Unit,
     onClearMockedData: () -> Unit,
     onExportWholeDb: () -> Unit,
@@ -690,7 +730,7 @@ private fun DatabaseToolsPanel(
 ) {
     var showClearConfirmation by rememberSaveable { mutableStateOf(false) }
 
-    if (showClearConfirmation) {
+    if (showMockTools && showClearConfirmation) {
         AlertDialog(
             onDismissRequest = { showClearConfirmation = false },
             title = { Text("Clear mocked data?") },
@@ -728,26 +768,28 @@ private fun DatabaseToolsPanel(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-            Button(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                onClick = onPopulateMockDb,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Populate mock DB")
-            }
-            OutlinedButton(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                onClick = { showClearConfirmation = true },
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Text("Clear mocked data")
+            if (showMockTools) {
+                Button(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    onClick = onPopulateMockDb,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Populate mock DB")
+                }
+                OutlinedButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    onClick = { showClearConfirmation = true },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Clear mocked data")
+                }
             }
             OutlinedButton(
                 modifier = Modifier
@@ -775,6 +817,83 @@ private fun DatabaseToolsPanel(
             status?.let { currentStatus ->
                 Text(
                     text = currentStatus,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoogleAccountLinkPanel(
+    authSession: AuthSession,
+    status: String?,
+    onLinkGoogleAccount: () -> Unit,
+    onUnlinkGoogleAccount: () -> Unit
+) {
+    val context = LocalContext.current
+    val usageLimiter = remember(context) { GoogleApiUsageLimiter(context.applicationContext) }
+    val placesDetailsStatus = remember(status, authSession.hasLinkedGoogleAccount) {
+        usageLimiter.status(GoogleApiSku.PLACES_DETAILS)
+    }
+    val dynamicMapsStatus = remember(status, authSession.hasLinkedGoogleAccount) {
+        usageLimiter.status(GoogleApiSku.DYNAMIC_MAPS)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Google account",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = if (authSession.hasLinkedGoogleAccount) {
+                    "Linked to ${authSession.linkedGoogleDisplayName ?: authSession.linkedGoogleAccountId}. Google APIs are available while online and inside the monthly free-use guard."
+                } else {
+                    "Local account is active. Link Google to use online Places and live Maps while keeping this local account as the data owner."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "This month: Places Details ${placesDetailsStatus.used}/${placesDetailsStatus.limit}; Dynamic Maps ${dynamicMapsStatus.used}/${dynamicMapsStatus.limit}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (authSession.hasLinkedGoogleAccount) {
+                OutlinedButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    onClick = onUnlinkGoogleAccount,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Unlink Google account")
+                }
+            } else {
+                Button(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    onClick = onLinkGoogleAccount,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Link Google account")
+                }
+            }
+            status?.let {
+                Text(
+                    text = it,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -872,6 +991,7 @@ private fun TripManagementScreen(
         ) {
             AppHeaderBar(
                 displayName = authSession.displayName,
+                linkedGoogleDisplayName = authSession.linkedGoogleDisplayName,
                 onSignOut = onSignOut
             )
             SkinSelector(
@@ -1009,6 +1129,7 @@ private fun UseExistingTripScreen(
         ) {
             AppHeaderBar(
                 displayName = authSession.displayName,
+                linkedGoogleDisplayName = authSession.linkedGoogleDisplayName,
                 onSignOut = onSignOut
             )
             SkinSelector(
@@ -1022,7 +1143,11 @@ private fun UseExistingTripScreen(
                     subtitle = tripDateRange(selectedTrip),
                     status = "Selected"
                 )
-                TripMapView(tripObjects = selectedTripObjects)
+                TripMapView(
+                    tripObjects = selectedTripObjects,
+                    isGoogleApiAllowed = authSession.hasLinkedGoogleAccount,
+                    googleApiBlockedReason = "Link Google on the main screen to render the live map. Saved map details remain available offline."
+                )
                 BookingsPanel(tripObjects = selectedTripObjects)
                 PrivateMapPresetPanel(
                     tripObjects = selectedTripObjects,
@@ -1422,6 +1547,7 @@ private fun SecondaryMenuButton(label: String) {
 private fun AppHeaderBar(
     modifier: Modifier = Modifier,
     displayName: String = "Guest",
+    linkedGoogleDisplayName: String? = null,
     onSignOut: (() -> Unit)? = null
 ) {
     Column(
@@ -1467,50 +1593,71 @@ private fun AppHeaderBar(
             }
         }
         if (onSignOut != null) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 58.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "L",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Text(
-                        text = "1",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFE53935)
+                        modifier = Modifier.weight(1f),
+                        text = displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE0C4B4)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "G",
-                        color = Color(0xFF4A2E24),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                linkedGoogleDisplayName?.takeIf { it.isNotBlank() }?.let { googleName ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE0C4B4)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "G",
+                                color = Color(0xFF4A2E24),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = googleName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
-                Text(
-                    modifier = Modifier.weight(1f),
-                    text = displayName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }
@@ -1930,10 +2077,14 @@ private fun PlanNewTripScreen(
             ownerAccountId = authSession.accountId
         )
     }
-    val googlePlacesRepository = remember(database) {
+    val googleApiUsageLimiter = remember(context) {
+        GoogleApiUsageLimiter(context.applicationContext)
+    }
+    val googlePlacesRepository = remember(database, googleApiUsageLimiter) {
         GooglePlacesRepository(
             context = context.applicationContext,
-            cacheDao = database.googlePlaceCacheDao()
+            cacheDao = database.googlePlaceCacheDao(),
+            usageLimiter = googleApiUsageLimiter
         )
     }
     val coroutineScope = rememberCoroutineScope()
@@ -2031,6 +2182,7 @@ private fun PlanNewTripScreen(
         parsedPriorityOrder != null &&
         priorityError == null
     val googlePlaceId = attributeValues[TripObjectAttribute.GOOGLE_PLACE_ID].orEmpty().trim()
+    val canUseOnlineGoogleApis = authSession.hasLinkedGoogleAccount
     val canFetchGoogleDetails = selectedObjectType.supportsGooglePlaceDetails() &&
         googlePlaceId.isNotBlank() &&
         !isFetchingGoogleDetails
@@ -2237,6 +2389,8 @@ private fun PlanNewTripScreen(
                                         if (cachedOnly) {
                                             googlePlacesRepository.getCachedPlace(googlePlaceId)
                                                 ?: error("No cached Google details for this place ID")
+                                        } else if (!canUseOnlineGoogleApis) {
+                                            error("Link Google on the main screen before using online Google Places")
                                         } else {
                                             googlePlacesRepository.fetchAndCachePlace(googlePlaceId)
                                         }
@@ -2393,7 +2547,11 @@ private fun PlanNewTripScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
-            TripMapView(tripObjects = tripObjects)
+            TripMapView(
+                tripObjects = tripObjects,
+                isGoogleApiAllowed = authSession.hasLinkedGoogleAccount,
+                googleApiBlockedReason = "Link Google on the main screen to render the live map. Saved map details remain available offline."
+            )
             BookingsPanel(tripObjects = tripObjects)
             PrivateMapPresetPanel(
                 tripObjects = tripObjects,
@@ -3207,6 +3365,8 @@ private fun MainMenuPreview() {
             ),
             appSkin = AppSkin.System,
             onAppSkinChange = {},
+            onLinkGoogleAccount = { null },
+            onUnlinkGoogleAccount = { null },
             onSignOut = {},
             onManageTrips = {},
             onUseExistingTrip = {}

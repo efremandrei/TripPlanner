@@ -13,9 +13,16 @@ fun configuredValue(name: String): String {
         ?: ""
 }
 
+fun configuredIntValue(name: String, defaultValue: Int): Int {
+    return configuredValue(name).toIntOrNull() ?: defaultValue
+}
+
 val mapsApiKey = configuredValue("MAPS_API_KEY")
 val placesApiKey = configuredValue("PLACES_API_KEY")
 val googleWebClientId = configuredValue("GOOGLE_WEB_CLIENT_ID")
+val googleDynamicMapsMonthlyLimit = configuredIntValue("GOOGLE_DYNAMIC_MAPS_MONTHLY_LIMIT", 10_000)
+val googlePlacesAutocompleteMonthlyLimit = configuredIntValue("GOOGLE_PLACES_AUTOCOMPLETE_MONTHLY_LIMIT", 10_000)
+val googlePlacesDetailsMonthlyLimit = configuredIntValue("GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT", 10_000)
 val escapedMapsApiKey = mapsApiKey
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
@@ -48,22 +55,15 @@ android {
         buildConfigField("String", "MAPS_API_KEY", "\"$escapedMapsApiKey\"")
         buildConfigField("String", "PLACES_API_KEY", "\"$escapedPlacesApiKey\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$escapedGoogleWebClientId\"")
+        buildConfigField("int", "GOOGLE_DYNAMIC_MAPS_MONTHLY_LIMIT", googleDynamicMapsMonthlyLimit.toString())
+        buildConfigField("int", "GOOGLE_PLACES_AUTOCOMPLETE_MONTHLY_LIMIT", googlePlacesAutocompleteMonthlyLimit.toString())
+        buildConfigField("int", "GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT", googlePlacesDetailsMonthlyLimit.toString())
         buildConfigField("boolean", "PREPOPULATE_MOCK_DB", "false")
     }
 
     buildFeatures {
         buildConfig = true
         compose = true
-    }
-
-    buildTypes {
-        create("mock") {
-            initWith(getByName("debug"))
-            matchingFallbacks += listOf("debug")
-            applicationIdSuffix = ".mock"
-            versionNameSuffix = "-mock"
-            buildConfigField("boolean", "PREPOPULATE_MOCK_DB", "true")
-        }
     }
 
     compileOptions {

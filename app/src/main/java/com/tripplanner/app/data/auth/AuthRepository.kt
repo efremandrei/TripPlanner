@@ -8,8 +8,13 @@ import java.util.UUID
 data class AuthSession(
     val accountId: String,
     val displayName: String,
-    val provider: AuthProvider
-)
+    val provider: AuthProvider,
+    val linkedGoogleAccountId: String? = null,
+    val linkedGoogleDisplayName: String? = null
+) {
+    val hasLinkedGoogleAccount: Boolean
+        get() = !linkedGoogleAccountId.isNullOrBlank()
+}
 
 enum class AuthProvider {
     LOCAL,
@@ -30,10 +35,16 @@ class AuthRepository(context: Context) {
         val provider = preferences.getString(KEY_SESSION_PROVIDER, null)
             ?.let { runCatching { AuthProvider.valueOf(it) }.getOrNull() }
             ?: AuthProvider.LOCAL
+        val linkedGoogleAccountId = preferences.getString(googleAccountKey(accountId), null)
+            ?: if (provider == AuthProvider.GOOGLE) accountId else null
+        val linkedGoogleDisplayName = preferences.getString(googleDisplayNameKey(accountId), null)
+            ?: if (provider == AuthProvider.GOOGLE) displayName else null
         return AuthSession(
             accountId = accountId,
             displayName = displayName,
-            provider = provider
+            provider = AuthProvider.LOCAL,
+            linkedGoogleAccountId = linkedGoogleAccountId,
+            linkedGoogleDisplayName = linkedGoogleDisplayName
         )
     }
 
@@ -89,30 +100,58 @@ class AuthRepository(context: Context) {
             session = AuthSession(
                 accountId = normalizedAccountName,
                 displayName = displayName,
-                provider = AuthProvider.LOCAL
+                provider = AuthProvider.LOCAL,
+                linkedGoogleAccountId = preferences.getString(googleAccountKey(normalizedAccountName), null),
+                linkedGoogleDisplayName = preferences.getString(googleDisplayNameKey(normalizedAccountName), null)
             )
         )
     }
 
-    fun signInGoogle(
+    fun linkGoogleAccount(
         accountId: String,
         displayName: String
     ): AuthOperationResult {
+        val currentLocalAccountId = preferences.getString(KEY_SESSION_ACCOUNT_ID, null)
+            ?: return AuthOperationResult(errorMessage = "Create or log in to a local account first")
         val normalizedAccountId = accountId.normalizedAccountName()
         if (normalizedAccountId.isBlank()) {
             return AuthOperationResult(errorMessage = "Google account did not include an email")
         }
+        val currentDisplayName = preferences.getString(KEY_SESSION_DISPLAY_NAME, null)
+            ?: currentLocalAccountId
+        val googleDisplayName = displayName.ifBlank { normalizedAccountId }
         preferences.edit()
-            .putString(KEY_SESSION_ACCOUNT_ID, normalizedAccountId)
-            .putString(KEY_SESSION_DISPLAY_NAME, displayName.ifBlank { normalizedAccountId })
-            .putString(KEY_SESSION_PROVIDER, AuthProvider.GOOGLE.name)
+            .putString(KEY_SESSION_PROVIDER, AuthProvider.LOCAL.name)
+            .putString(googleAccountKey(currentLocalAccountId), normalizedAccountId)
+            .putString(googleDisplayNameKey(currentLocalAccountId), googleDisplayName)
             .apply()
 
         return AuthOperationResult(
             session = AuthSession(
-                accountId = normalizedAccountId,
-                displayName = displayName.ifBlank { normalizedAccountId },
-                provider = AuthProvider.GOOGLE
+                accountId = currentLocalAccountId,
+                displayName = currentDisplayName,
+                provider = AuthProvider.LOCAL,
+                linkedGoogleAccountId = normalizedAccountId,
+                linkedGoogleDisplayName = googleDisplayName
+            )
+        )
+    }
+
+    fun unlinkGoogleAccount(): AuthOperationResult {
+        val currentLocalAccountId = preferences.getString(KEY_SESSION_ACCOUNT_ID, null)
+            ?: return AuthOperationResult(errorMessage = "Log in to a local account first")
+        val currentDisplayName = preferences.getString(KEY_SESSION_DISPLAY_NAME, null)
+            ?: currentLocalAccountId
+        preferences.edit()
+            .remove(googleAccountKey(currentLocalAccountId))
+            .remove(googleDisplayNameKey(currentLocalAccountId))
+            .apply()
+
+        return AuthOperationResult(
+            session = AuthSession(
+                accountId = currentLocalAccountId,
+                displayName = currentDisplayName,
+                provider = AuthProvider.LOCAL
             )
         )
     }
@@ -134,6 +173,10 @@ class AuthRepository(context: Context) {
     private fun hashKey(accountName: String): String = "local.$accountName.hash"
 
     private fun displayNameKey(accountName: String): String = "local.$accountName.displayName"
+
+    private fun googleAccountKey(accountName: String): String = "local.$accountName.googleAccount"
+
+    private fun googleDisplayNameKey(accountName: String): String = "local.$accountName.googleDisplayName"
 
     private fun hashPassword(
         salt: String,

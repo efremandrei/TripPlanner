@@ -24,11 +24,10 @@ To enable Google account login, create an OAuth Web client ID in Google Cloud an
 GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 ```
 
-For debug builds on this machine, configure Android OAuth clients with these package names:
+For debug builds on this machine, configure the Android OAuth client with this package name:
 
 ```text
 com.tripplanner.app
-com.tripplanner.app.mock
 ```
 
 Current debug signing certificate fingerprints on this machine:

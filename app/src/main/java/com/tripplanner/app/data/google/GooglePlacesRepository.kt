@@ -15,7 +15,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 class GooglePlacesRepository(
     private val context: Context,
-    private val cacheDao: GooglePlaceCacheDao
+    private val cacheDao: GooglePlaceCacheDao,
+    private val usageLimiter: GoogleApiUsageLimiter? = null
 ) {
     val isConfigured: Boolean
         get() = BuildConfig.PLACES_API_KEY.isNotBlank() && Places.isInitialized()
@@ -27,6 +28,12 @@ class GooglePlacesRepository(
         if (!isConfigured) {
             return cacheDao.getPlace(normalizedPlaceId)?.toDetails()
                 ?: error("Places API key is not configured")
+        }
+
+        usageLimiter?.tryConsume(GoogleApiSku.PLACES_DETAILS)?.let { decision ->
+            if (!decision.allowed) {
+                error(decision.message)
+            }
         }
 
         val request = FetchPlaceRequest.newInstance(normalizedPlaceId, PLACE_FIELDS)
