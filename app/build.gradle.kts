@@ -17,21 +17,35 @@ fun configuredIntValue(name: String, defaultValue: Int): Int {
     return configuredValue(name).toIntOrNull() ?: defaultValue
 }
 
+fun String.escapedForBuildConfig(): String {
+    return replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+}
+
 val mapsApiKey = configuredValue("MAPS_API_KEY")
 val placesApiKey = configuredValue("PLACES_API_KEY")
 val googleWebClientId = configuredValue("GOOGLE_WEB_CLIENT_ID")
+val allowGoogleRelease = configuredValue("ALLOW_GOOGLE_RELEASE").equals("true", ignoreCase = true)
 val googleDynamicMapsMonthlyLimit = configuredIntValue("GOOGLE_DYNAMIC_MAPS_MONTHLY_LIMIT", 10_000)
 val googlePlacesAutocompleteMonthlyLimit = configuredIntValue("GOOGLE_PLACES_AUTOCOMPLETE_MONTHLY_LIMIT", 10_000)
 val googlePlacesDetailsMonthlyLimit = configuredIntValue("GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT", 10_000)
-val escapedMapsApiKey = mapsApiKey
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
-val escapedPlacesApiKey = placesApiKey
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
-val escapedGoogleWebClientId = googleWebClientId
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
+val releaseMapsApiKey = if (allowGoogleRelease) mapsApiKey else ""
+val releasePlacesApiKey = if (allowGoogleRelease) placesApiKey else ""
+val releaseGoogleWebClientId = if (allowGoogleRelease) googleWebClientId else ""
+
+if (allowGoogleRelease) {
+    val missingReleaseGoogleConfig = listOf(
+        "MAPS_API_KEY" to mapsApiKey,
+        "PLACES_API_KEY" to placesApiKey,
+        "GOOGLE_WEB_CLIENT_ID" to googleWebClientId
+    ).filter { (_, value) -> value.isBlank() }
+
+    check(missingReleaseGoogleConfig.isEmpty()) {
+        "ALLOW_GOOGLE_RELEASE=true requires: ${
+            missingReleaseGoogleConfig.joinToString { it.first }
+        }"
+    }
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -52,9 +66,9 @@ android {
         versionName = "0.1.0"
 
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$escapedMapsApiKey\"")
-        buildConfigField("String", "PLACES_API_KEY", "\"$escapedPlacesApiKey\"")
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$escapedGoogleWebClientId\"")
+        buildConfigField("String", "MAPS_API_KEY", "\"${mapsApiKey.escapedForBuildConfig()}\"")
+        buildConfigField("String", "PLACES_API_KEY", "\"${placesApiKey.escapedForBuildConfig()}\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${googleWebClientId.escapedForBuildConfig()}\"")
         buildConfigField("int", "GOOGLE_DYNAMIC_MAPS_MONTHLY_LIMIT", googleDynamicMapsMonthlyLimit.toString())
         buildConfigField("int", "GOOGLE_PLACES_AUTOCOMPLETE_MONTHLY_LIMIT", googlePlacesAutocompleteMonthlyLimit.toString())
         buildConfigField("int", "GOOGLE_PLACES_DETAILS_MONTHLY_LIMIT", googlePlacesDetailsMonthlyLimit.toString())
@@ -64,6 +78,15 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
+    }
+
+    buildTypes {
+        getByName("release") {
+            manifestPlaceholders["MAPS_API_KEY"] = releaseMapsApiKey
+            buildConfigField("String", "MAPS_API_KEY", "\"${releaseMapsApiKey.escapedForBuildConfig()}\"")
+            buildConfigField("String", "PLACES_API_KEY", "\"${releasePlacesApiKey.escapedForBuildConfig()}\"")
+            buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${releaseGoogleWebClientId.escapedForBuildConfig()}\"")
+        }
     }
 
     compileOptions {

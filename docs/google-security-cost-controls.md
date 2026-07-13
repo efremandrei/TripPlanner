@@ -69,6 +69,8 @@ The app still builds and runs offline when Google keys are blank.
 - Places SDK initialization is skipped when `PLACES_API_KEY` is blank.
 - Live Google map rendering is skipped when `MAPS_API_KEY` is blank.
 - Google account linking is disabled when `GOOGLE_WEB_CLIENT_ID` is blank.
+- Release builds blank Google key/client values by default.
+- To build a Google-enabled release, set `ALLOW_GOOGLE_RELEASE=true`; this requires `MAPS_API_KEY`, `PLACES_API_KEY`, and `GOOGLE_WEB_CLIENT_ID`.
 
 Root APK artifacts pushed to GitHub must match the current normal build only. Mock APK artifacts are intentionally hidden/removed.
 

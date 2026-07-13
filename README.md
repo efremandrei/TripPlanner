@@ -46,6 +46,14 @@ PLACES_API_KEY=...
 
 The app uses Android Credential Manager for Google sign-in. If `GOOGLE_WEB_CLIENT_ID` is missing, the APK still builds and local accounts still work, but the Google login button will show that the APK needs to be rebuilt with that value.
 
+Release builds intentionally remove Google key values unless this is set:
+
+```properties
+ALLOW_GOOGLE_RELEASE=true
+```
+
+Only enable that flag after Android API key restrictions, API restrictions, quotas, and the release OAuth client are configured. When the flag is enabled, release builds require `MAPS_API_KEY`, `PLACES_API_KEY`, and `GOOGLE_WEB_CLIENT_ID`.
+
 Security and cost controls for the Google Cloud project are tracked in:
 
 ```text
