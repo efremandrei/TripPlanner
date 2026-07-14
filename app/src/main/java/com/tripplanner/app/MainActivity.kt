@@ -40,6 +40,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -117,6 +120,10 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import java.security.SecureRandom
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
@@ -2346,19 +2353,15 @@ private fun PlanNewTripScreen(
                             capitalization = KeyboardCapitalization.Words
                         )
                     )
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
+                    TripDatePickerField(
+                        label = "Start date",
                         value = startDate,
-                        onValueChange = { startDate = it },
-                        label = { Text("Start date") },
-                        singleLine = true
+                        onValueChange = { startDate = it }
                     )
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
+                    TripDatePickerField(
+                        label = "End date",
                         value = endDate,
-                        onValueChange = { endDate = it },
-                        label = { Text("End date") },
-                        singleLine = true
+                        onValueChange = { endDate = it }
                     )
                 }
             }
@@ -2738,6 +2741,105 @@ private fun tripDateRange(trip: TripEntity): String {
         endDate = trip.endDate
     )
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TripDatePickerField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    var showDatePicker by rememberSaveable(label) { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold
+        )
+        OutlinedButton(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            onClick = { showDatePicker = true },
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = value.ifBlank { "Choose date" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (value.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                Text(
+                    text = "Calendar",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = value.toDatePickerMillisOrNull()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    enabled = datePickerState.selectedDateMillis != null,
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { selectedDateMillis ->
+                            onValueChange(selectedDateMillis.toTripDateString())
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("Use date")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+private fun String.toDatePickerMillisOrNull(): Long? {
+    val dateText = trim().takeIf { it.isNotBlank() } ?: return null
+    return runCatching {
+        LocalDate.parse(dateText, tripDateFormatter)
+            .atStartOfDay()
+            .toInstant(ZoneOffset.UTC)
+            .toEpochMilli()
+    }.getOrNull()
+}
+
+private fun Long.toTripDateString(): String {
+    return Instant.ofEpochMilli(this)
+        .atZone(ZoneOffset.UTC)
+        .toLocalDate()
+        .format(tripDateFormatter)
+}
+
+private val tripDateFormatter: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
 @Composable
 private fun TravelItineraryPanel(
