@@ -140,7 +140,8 @@ enum class TripObjectType(
             TripObjectAttribute.CHECK_IN,
             TripObjectAttribute.CHECK_OUT,
             TripObjectAttribute.IS_WITH_BREAKFAST,
-            TripObjectAttribute.ROOM_NUMBER
+            TripObjectAttribute.ROOM_NUMBER,
+            TripObjectAttribute.NOTES
         )
     ),
     FOOD_PLACE(
@@ -157,7 +158,8 @@ enum class TripObjectType(
             TripObjectAttribute.GOOGLE_PLACE_ID,
             TripObjectAttribute.GOOGLE_MAPS_URL,
             TripObjectAttribute.WORKING_HOURS,
-            TripObjectAttribute.ENGLISH_MENU_WITH_PRICES
+            TripObjectAttribute.ENGLISH_MENU_WITH_PRICES,
+            TripObjectAttribute.NOTES
         )
     ),
     TRANSPORTATION(
@@ -228,7 +230,8 @@ enum class TripObjectType(
             TripObjectAttribute.TICKET_PRICES,
             TripObjectAttribute.WORKING_HOURS,
             TripObjectAttribute.WEBSITE_URL,
-            TripObjectAttribute.PLANNED_VISIT_DATE_TIME
+            TripObjectAttribute.PLANNED_VISIT_DATE_TIME,
+            TripObjectAttribute.NOTES
         )
     ),
     FREE_ATTRACTION(
@@ -243,7 +246,8 @@ enum class TripObjectType(
             TripObjectAttribute.GOOGLE_MAPS_URL,
             TripObjectAttribute.WORKING_HOURS,
             TripObjectAttribute.WEBSITE_URL,
-            TripObjectAttribute.PLANNED_VISIT_DATE_TIME
+            TripObjectAttribute.PLANNED_VISIT_DATE_TIME,
+            TripObjectAttribute.NOTES
         )
     )
 }

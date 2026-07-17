@@ -1685,7 +1685,7 @@ private fun TripHeroPanel(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(196.dp)
+            .height(124.dp)
             .clip(RoundedCornerShape(8.dp))
     ) {
         TripHeroVisual(modifier = Modifier.fillMaxSize())
@@ -1704,32 +1704,36 @@ private fun TripHeroPanel(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFFE6F4EF)
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFE6F4EF),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(14.dp)
+                .padding(10.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFFD7FFE7))
-                .padding(horizontal = 12.dp, vertical = 7.dp)
+                .padding(horizontal = 10.dp, vertical = 5.dp)
         ) {
             Text(
                 text = status,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF176B5B)
             )
@@ -2475,12 +2479,38 @@ private fun PlanNewTripScreen(
                             onSelectResult = ::selectGooglePlaceSearchResult
                         )
                     }
-                    selectedObjectType.attributes.forEach { attribute ->
-                        TripAttributeInput(
-                            attribute = attribute,
-                            value = attributeValues[attribute].orEmpty(),
-                            onValueChange = { attributeValues[attribute] = it }
-                        )
+                    selectedObjectType.attributes
+                        .filterNot { it == TripObjectAttribute.NOTES }
+                        .forEach { attribute ->
+                            TripAttributeInput(
+                                attribute = attribute,
+                                value = attributeValues[attribute].orEmpty(),
+                                onValueChange = { attributeValues[attribute] = it }
+                            )
+                        }
+                    if (TripObjectAttribute.NOTES in selectedObjectType.attributes) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Notes",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            OutlinedTextField(
+                                modifier = Modifier.fillMaxWidth(),
+                                value = attributeValues[TripObjectAttribute.NOTES].orEmpty(),
+                                onValueChange = {
+                                    attributeValues[TripObjectAttribute.NOTES] = it
+                                },
+                                label = { Text("Add notes") },
+                                minLines = 4,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences
+                                )
+                            )
+                        }
                     }
                     if (selectedObjectType.supportsGooglePlaceDetails()) {
                         OutlinedButton(
