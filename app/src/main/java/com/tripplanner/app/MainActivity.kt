@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -267,6 +269,7 @@ private fun TripPlannerApp() {
     var appSkin by rememberSaveable { mutableStateOf(AppSkin.System) }
     var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? Activity
     val authRepository = remember(context) { AuthRepository(context.applicationContext) }
@@ -324,6 +327,7 @@ private fun TripPlannerApp() {
                 AuthScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
+                    onAbout = { showAbout = true },
                     onLocalSignIn = { accountName, password ->
                         authRepository.signInLocal(
                             accountName = accountName,
@@ -347,6 +351,7 @@ private fun TripPlannerApp() {
                         authSession = session,
                         appSkin = appSkin,
                         onAppSkinChange = { appSkin = it },
+                        onAbout = { showAbout = true },
                         onLinkGoogleAccount = {
                             val hostActivity = activity
                             if (hostActivity == null) {
@@ -432,8 +437,43 @@ private fun TripPlannerApp() {
                     }
                 )
             }
+            if (showAbout) {
+                AboutDialog(onDismiss = { showAbout = false })
+            }
         }
     }
+}
+
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("About Trip Planner") },
+        text = {
+            Column {
+                Text("Developer: Andrei Efremushkin")
+                Text(
+                    "Email: andrei.efr@gmail.com",
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("mailto:andrei.efr@gmail.com")
+                    }
+                )
+                Text(
+                    "GitHub: https://github.com/efremandrei/TripPlanner",
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("https://github.com/efremandrei/TripPlanner")
+                    }
+                )
+                Text("Version: ${BuildConfig.VERSION_NAME}/${BuildConfig.VERSION_CODE}")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -445,7 +485,8 @@ private fun MainMenuScreen(
     onUnlinkGoogleAccount: () -> String?,
     onSignOut: () -> Unit,
     onManageTrips: () -> Unit,
-    onUseExistingTrip: () -> Unit
+    onUseExistingTrip: () -> Unit,
+    onAbout: () -> Unit
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
@@ -506,7 +547,8 @@ private fun MainMenuScreen(
                 linkedGoogleDisplayName = authSession.linkedGoogleDisplayName,
                 onSignOut = onSignOut,
                 appSkin = appSkin,
-                onAppSkinChange = onAppSkinChange
+                onAppSkinChange = onAppSkinChange,
+                onAbout = onAbout
             )
             GoogleAccountLinkPanel(
                 authSession = authSession,
@@ -581,6 +623,7 @@ private fun MainMenuScreen(
 private fun AuthScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onAbout: () -> Unit,
     onLocalSignIn: (String, String) -> String?,
     onCreateAccount: (String, String) -> String?
 ) {
@@ -606,7 +649,8 @@ private fun AuthScreen(
         ) {
             AppHeaderBar(
                 appSkin = appSkin,
-                onAppSkinChange = onAppSkinChange
+                onAppSkinChange = onAppSkinChange,
+                onAbout = onAbout
             )
             TripHeroPanel(
                 title = "Trip Planner",
@@ -1568,7 +1612,8 @@ private fun AppHeaderBar(
     linkedGoogleDisplayName: String? = null,
     onSignOut: (() -> Unit)? = null,
     appSkin: AppSkin? = null,
-    onAppSkinChange: ((AppSkin) -> Unit)? = null
+    onAppSkinChange: ((AppSkin) -> Unit)? = null,
+    onAbout: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -1607,6 +1652,11 @@ private fun AppHeaderBar(
                     appSkin = appSkin,
                     onAppSkinChange = onAppSkinChange
                 )
+            }
+            onAbout?.let { showAbout ->
+                TextButton(onClick = showAbout) {
+                    Text("About")
+                }
             }
             onSignOut?.let { signOut ->
                 TextButton(onClick = signOut) {
@@ -4245,7 +4295,8 @@ private fun MainMenuPreview() {
             onUnlinkGoogleAccount = { null },
             onSignOut = {},
             onManageTrips = {},
-            onUseExistingTrip = {}
+            onUseExistingTrip = {},
+            onAbout = {}
         )
     }
 }
