@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -133,6 +134,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppUpdateChecker.checkDaily(this)
         setContent {
             TripPlannerApp()
         }
@@ -1570,6 +1572,8 @@ private fun AppHeaderBar(
     appSkin: AppSkin? = null,
     onAppSkinChange: ((AppSkin) -> Unit)? = null
 ) {
+    var showAbout by rememberSaveable { mutableStateOf(false) }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1608,6 +1612,13 @@ private fun AppHeaderBar(
                     onAppSkinChange = onAppSkinChange
                 )
             }
+            TextButton(onClick = { showAbout = true }) {
+                Text(
+                    text = "About",
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip
+                )
+            }
             onSignOut?.let { signOut ->
                 TextButton(onClick = signOut) {
                     Text(
@@ -1617,6 +1628,9 @@ private fun AppHeaderBar(
                     )
                 }
             }
+        }
+        if (showAbout) {
+            AboutDialog(onDismiss = { showAbout = false })
         }
         if (onSignOut != null) {
             Column(
@@ -1687,6 +1701,40 @@ private fun AppHeaderBar(
             }
         }
     }
+}
+
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val uriHandler = LocalUriHandler.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("About Trip Planner") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Developer: Andrei Efremuahkin")
+                TextButton(onClick = { uriHandler.openUri("mailto:andrei.efr@gmail.com") }) {
+                    Text("Email: andrei.efr@gmail.com")
+                }
+                TextButton(onClick = { uriHandler.openUri("https://github.com/efremandrei/TripPlanner") }) {
+                    Text("GitHub: https://github.com/efremandrei/TripPlanner")
+                }
+                Text("Version: ${BuildConfig.VERSION_NAME} build ${BuildConfig.VERSION_CODE}")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { activity?.let(AppUpdateChecker::checkNow) }) {
+                Text("Check for updates")
+            }
+        }
+    )
 }
 
 @Composable
