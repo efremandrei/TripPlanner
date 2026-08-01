@@ -135,6 +135,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppUpdateChecker.checkDaily(this)
         setContent {
             TripPlannerApp()
         }
@@ -446,6 +447,8 @@ private fun TripPlannerApp() {
 
 @Composable
 private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val activity = context as? Activity
     val uriHandler = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -471,6 +474,11 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("Close")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { activity?.let(AppUpdateChecker::checkNow) }) {
+                Text("Check for updates")
             }
         }
     )
