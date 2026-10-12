@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -269,6 +270,7 @@ private fun TripPlannerApp() {
     var appSkin by rememberSaveable { mutableStateOf(AppSkin.System) }
     var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? Activity
     val authRepository = remember(context) { AuthRepository(context.applicationContext) }
@@ -326,6 +328,7 @@ private fun TripPlannerApp() {
                 AuthScreen(
                     appSkin = appSkin,
                     onAppSkinChange = { appSkin = it },
+                    onAbout = { showAbout = true },
                     onLocalSignIn = { accountName, password ->
                         authRepository.signInLocal(
                             accountName = accountName,
@@ -349,6 +352,7 @@ private fun TripPlannerApp() {
                         authSession = session,
                         appSkin = appSkin,
                         onAppSkinChange = { appSkin = it },
+                        onAbout = { showAbout = true },
                         onLinkGoogleAccount = {
                             val hostActivity = activity
                             if (hostActivity == null) {
@@ -434,9 +438,14 @@ private fun TripPlannerApp() {
                     }
                 )
             }
+            if (showAbout) {
+                AboutDialog(onDismiss = { showAbout = false })
+            }
         }
     }
 }
+
+
 
 @Composable
 private fun MainMenuScreen(
@@ -447,7 +456,8 @@ private fun MainMenuScreen(
     onUnlinkGoogleAccount: () -> String?,
     onSignOut: () -> Unit,
     onManageTrips: () -> Unit,
-    onUseExistingTrip: () -> Unit
+    onUseExistingTrip: () -> Unit,
+    onAbout: () -> Unit
 ) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
@@ -508,7 +518,8 @@ private fun MainMenuScreen(
                 linkedGoogleDisplayName = authSession.linkedGoogleDisplayName,
                 onSignOut = onSignOut,
                 appSkin = appSkin,
-                onAppSkinChange = onAppSkinChange
+                onAppSkinChange = onAppSkinChange,
+                onAbout = onAbout
             )
             GoogleAccountLinkPanel(
                 authSession = authSession,
@@ -583,6 +594,7 @@ private fun MainMenuScreen(
 private fun AuthScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
+    onAbout: () -> Unit,
     onLocalSignIn: (String, String) -> String?,
     onCreateAccount: (String, String) -> String?
 ) {
@@ -608,7 +620,8 @@ private fun AuthScreen(
         ) {
             AppHeaderBar(
                 appSkin = appSkin,
-                onAppSkinChange = onAppSkinChange
+                onAppSkinChange = onAppSkinChange,
+                onAbout = onAbout
             )
             TripHeroPanel(
                 title = "Trip Planner",
@@ -1566,141 +1579,34 @@ private fun SecondaryMenuButton(label: String) {
 @Composable
 private fun AppHeaderBar(
     modifier: Modifier = Modifier,
-    displayName: String = "Guest",
+    displayName: String = "Local account",
     linkedGoogleDisplayName: String? = null,
     onSignOut: (() -> Unit)? = null,
     appSkin: AppSkin? = null,
-    onAppSkinChange: ((AppSkin) -> Unit)? = null
+    onAppSkinChange: ((AppSkin) -> Unit)? = null,
+    onAbout: (() -> Unit)? = null
 ) {
     var showAbout by rememberSaveable { mutableStateOf(false) }
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Row(
+        modifier = modifier.fillMaxWidth().height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "TP",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Text(
-                modifier = Modifier.weight(1f),
-                text = "Trip Planner",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (appSkin != null && onAppSkinChange != null) {
-                ThemeToggleButton(
-                    appSkin = appSkin,
-                    onAppSkinChange = onAppSkinChange
-                )
-            }
-            TextButton(onClick = { showAbout = true }) {
-                Text(
-                    text = "About",
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip
-                )
-            }
-            onSignOut?.let { signOut ->
-                TextButton(onClick = signOut) {
-                    Text(
-                        text = "Sign out",
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip
-                    )
-                }
-            }
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground),
+            contentDescription = null,
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer)
+        )
+        Text("Trip Planner", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (appSkin != null && onAppSkinChange != null) {
+            ThemeToggleButton(appSkin, onAppSkinChange)
         }
-        if (showAbout) {
-            AboutDialog(onDismiss = { showAbout = false })
-        }
-        if (onSignOut != null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 58.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "L",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Text(
-                        modifier = Modifier.weight(1f),
-                        text = displayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                linkedGoogleDisplayName?.takeIf { it.isNotBlank() }?.let { googleName ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE0C4B4)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "G",
-                                color = Color(0xFF4A2E24),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = googleName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
+        ActionIcon("About", androidx.compose.material.icons.Icons.Outlined.Info,
+            onClick = { if (onAbout != null) onAbout() else showAbout = true })
     }
+    if (showAbout) AboutDialog { showAbout = false }
 }
 
 @Composable
@@ -4293,7 +4199,8 @@ private fun MainMenuPreview() {
             onUnlinkGoogleAccount = { null },
             onSignOut = {},
             onManageTrips = {},
-            onUseExistingTrip = {}
+            onUseExistingTrip = {},
+            onAbout = {}
         )
     }
 }
