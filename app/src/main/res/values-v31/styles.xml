@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.TripPlanner.Starting.Platform" parent="Theme.TripPlanner.Starting.Base">
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_wordmark</item>
+    </style>
+    <style name="Theme.TripPlanner.Starting.Platform.Light" parent="Theme.TripPlanner.Starting.Light.Base">
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_wordmark_light</item>
+    </style>
+    <style name="Theme.TripPlanner.Starting" parent="Theme.TripPlanner.Starting.Platform" />
+    <style name="Theme.TripPlanner.Starting.Light" parent="Theme.TripPlanner.Starting.Platform.Light" />
+</resources>

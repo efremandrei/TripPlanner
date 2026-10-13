@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.TripPlanner.Starting" parent="Theme.TripPlanner.Starting.Platform">
+        <item name="android:windowSplashScreenBehavior">icon_preferred</item>
+    </style>
+    <style name="Theme.TripPlanner.Starting.Light" parent="Theme.TripPlanner.Starting.Platform.Light">
+        <item name="android:windowSplashScreenBehavior">icon_preferred</item>
+    </style>
+</resources>

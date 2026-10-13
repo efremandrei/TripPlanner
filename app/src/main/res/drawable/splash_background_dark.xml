@@ -1,0 +1,8 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><solid android:color="#141719" /></shape></item>
+    <item android:width="288dp" android:height="288dp" android:gravity="center"
+        android:drawable="@drawable/ic_launcher_foreground" />
+    <item android:width="200dp" android:height="80dp"
+        android:gravity="bottom|center_horizontal" android:bottom="40dp"
+        android:drawable="@drawable/splash_wordmark_dark" />
+</layer-list>

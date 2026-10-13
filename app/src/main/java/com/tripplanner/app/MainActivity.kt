@@ -139,17 +139,32 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var startupReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val savedSkin = getSharedPreferences("trip_planner_ui", 0).getString("skin", "Dark")
-        setTheme(if (savedSkin == "Light") R.style.Theme_TripPlanner_Starting_Light else R.style.Theme_TripPlanner_Starting)
-        installSplashScreen()
+        val useLightSkin = savedSkin == "Light" || (savedSkin == "System" &&
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) !=
+            android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        setTheme(if (useLightSkin) R.style.Theme_TripPlanner_Starting_Light else R.style.Theme_TripPlanner_Starting)
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splash.setKeepOnScreenCondition { !startupReady }
+        splash.setOnExitAnimationListener { provider ->
+            if (android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                provider.view.animate().alpha(0f).setDuration(160L)
+                    .withEndAction { provider.remove() }.start()
+            } else {
+                provider.remove()
+            }
+        }
         AppUpdateChecker.checkDaily(this)
         setContent {
-            TripPlannerApp()
+            TripPlannerApp(onStartupReady = { startupReady = true })
         }
     }
 }
@@ -280,14 +295,24 @@ private fun generateSecureRandomNonce(byteLength: Int = 32): String {
 }
 
 @Composable
-private fun TripPlannerApp() {
+private fun TripPlannerApp(onStartupReady: () -> Unit = {}) {
     var screen by rememberSaveable { mutableStateOf(Screen.MainMenu) }
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("trip_planner_ui", 0) }
     var appSkin by rememberSaveable {
         mutableStateOf(runCatching { AppSkin.valueOf(preferences.getString("skin", "Dark")!!) }.getOrDefault(AppSkin.Dark))
     }
-    LaunchedEffect(appSkin) { preferences.edit().putString("skin", appSkin.name).apply() }
+    LaunchedEffect(appSkin) {
+        preferences.edit().putString("skin", appSkin.name).apply()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val mode = when (appSkin) {
+                AppSkin.Light -> android.app.UiModeManager.MODE_NIGHT_NO
+                AppSkin.Dark -> android.app.UiModeManager.MODE_NIGHT_YES
+                AppSkin.System -> android.app.UiModeManager.MODE_NIGHT_AUTO
+            }
+            context.getSystemService(android.app.UiModeManager::class.java).setApplicationNightMode(mode)
+        }
+    }
     var usingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingTripId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -303,6 +328,14 @@ private fun TripPlannerApp() {
         )
     }
     var authSession by remember { mutableStateOf(authRepository.currentSession()) }
+
+    LaunchedEffect(database, authSession?.accountId) {
+        try {
+            authSession?.accountId?.let { database.tripDao().observeActiveTripsForAccount(it).first() }
+        } finally {
+            onStartupReady()
+        }
+    }
 
     fun returnToMainPage() {
         editingTripId = null
@@ -1410,7 +1443,7 @@ private fun AppHeaderBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground),
+            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_brand_mark),
             contentDescription = null,
             modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.primaryContainer)

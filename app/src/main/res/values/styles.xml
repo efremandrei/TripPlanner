@@ -1,16 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.TripPlanner" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">#F7FAF8</item>
-        <item name="android:statusBarColor">#F7FAF8</item>
+    <style name="Theme.TripPlanner" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#141719</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#141719</item>
+        <item name="android:statusBarColor">#141719</item>
     </style>
-    <style name="Theme.TripPlanner.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">#141719</item>
+    <style name="Theme.TripPlanner.Light" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F5F7F8</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F5F7F8</item>
+        <item name="android:statusBarColor">#F5F7F8</item>
+    </style>
+    <style name="Theme.TripPlanner.Starting.Base" parent="Theme.SplashScreen">
+        <item name="android:windowBackground">@drawable/splash_background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#141719</item>
+        <item name="android:statusBarColor">#141719</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
         <item name="postSplashScreenTheme">@style/Theme.TripPlanner</item>
     </style>
-    <style name="Theme.TripPlanner.Starting.Light" parent="Theme.TripPlanner.Starting">
+    <style name="Theme.TripPlanner.Starting.Light.Base" parent="Theme.TripPlanner.Starting.Base">
+        <item name="android:windowBackground">@drawable/splash_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F5F7F8</item>
+        <item name="android:statusBarColor">#F5F7F8</item>
         <item name="windowSplashScreenBackground">#F5F7F8</item>
+        <item name="postSplashScreenTheme">@style/Theme.TripPlanner.Light</item>
     </style>
+    <style name="Theme.TripPlanner.Starting" parent="Theme.TripPlanner.Starting.Base" />
+    <style name="Theme.TripPlanner.Starting.Light" parent="Theme.TripPlanner.Starting.Light.Base" />
 </resources>

@@ -62,8 +62,8 @@ android {
         applicationId = "com.tripplanner.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.2.0"
+        versionCode = 5
+        versionName = "0.2.1"
         ndk { abiFilters += "arm64-v8a" }
 
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
