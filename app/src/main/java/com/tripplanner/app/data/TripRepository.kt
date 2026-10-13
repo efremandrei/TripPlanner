@@ -30,6 +30,24 @@ class TripRepository(
     private val database: TripPlannerDatabase,
     private val ownerAccountId: String? = null
 ) {
+    suspend fun saveGeneralItem(draft: TripObjectDraft): Long {
+        require(draft.name.isNotBlank()) { "Enter an item name" }
+        return database.withTransaction {
+            val now = System.currentTimeMillis()
+            val itemId = upsertPoolItem(draft.copy(name = draft.name.trim()), now)
+            val poolId = ensureGeneralPool(now)
+            ensureGeneralMembership(poolId, itemId, now)
+            val membership = database.poolItemDao().getMembership(poolId, itemId)!!
+            val priority = draft.priorityOrder.takeIf { it > 0 } ?: membership.priorityOrder
+            require(database.poolItemDao().getMembershipsForPool(poolId).none {
+                it.itemId != itemId && it.priorityOrder == priority
+            }) { "Order number already used in General" }
+            database.poolItemDao().upsertMemberships(listOf(membership.copy(priorityOrder = priority, updatedAtMillis = now)))
+            database.poolItemDao().replaceItemRelations(itemId, draft.relatedObjectIds.filter { it != itemId && it > 0 }.toSet())
+            itemId
+        }
+    }
+
     suspend fun createTrip(
         destination: String,
         startDate: String,
@@ -156,8 +174,10 @@ class TripRepository(
 
     suspend fun getPoolItemDraft(itemId: Long): TripObjectDraft? {
         return database.withTransaction {
+            val pool = database.itemPoolDao().getPoolWithoutTrip(ItemPoolType.GENERAL)
+            val priority = pool?.let { database.poolItemDao().getMembership(it.id, itemId)?.priorityOrder } ?: 0
             database.poolItemDao().getItemWithDetails(itemId)
-                ?.toDraft(priorityOrder = 0)
+                ?.toDraft(priorityOrder = priority)
         }
     }
 

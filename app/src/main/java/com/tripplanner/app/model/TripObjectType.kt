@@ -152,6 +152,7 @@ enum class TripObjectType(
             TripObjectAttribute.PHONE_NUMBER,
             TripObjectAttribute.EMAIL_ADDRESS,
             TripObjectAttribute.FOOD_TYPE,
+            TripObjectAttribute.PLANNED_VISIT_DATE_TIME,
             TripObjectAttribute.ADDRESS,
             TripObjectAttribute.LATITUDE,
             TripObjectAttribute.LONGITUDE,
@@ -205,6 +206,7 @@ enum class TripObjectType(
         attributes = listOf(
             TripObjectAttribute.ICONIC_PICTURE,
             TripObjectAttribute.CATEGORY,
+            TripObjectAttribute.PLANNED_VISIT_DATE_TIME,
             TripObjectAttribute.ADDRESS,
             TripObjectAttribute.LATITUDE,
             TripObjectAttribute.LONGITUDE,

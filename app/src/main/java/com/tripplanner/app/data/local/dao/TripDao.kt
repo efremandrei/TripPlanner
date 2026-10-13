@@ -56,4 +56,7 @@ interface TripDao {
 
     @Query("UPDATE trips SET is_archived = 1, updated_at_millis = :updatedAtMillis WHERE id = :tripId")
     suspend fun archiveTrip(tripId: Long, updatedAtMillis: Long)
+
+    @Query("UPDATE trips SET is_archived = 0, updated_at_millis = :updatedAtMillis WHERE id = :tripId")
+    suspend fun restoreTrip(tripId: Long, updatedAtMillis: Long)
 }

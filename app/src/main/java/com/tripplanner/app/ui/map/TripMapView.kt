@@ -59,7 +59,7 @@ fun TripMapView(
             mapItems = mapItems,
             reason = when {
                 BuildConfig.MAPS_API_KEY.isBlank() -> {
-                    "Add MAPS_API_KEY to local.properties to render the live map."
+                    "The online map is not configured. Your saved places remain available."
                 }
                 !isGoogleApiAllowed -> googleApiBlockedReason
                 !context.isOnline() -> "Offline mode is using locally saved map details."
@@ -151,7 +151,7 @@ private fun OfflineMapFallback(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (mapItems.markers.isNotEmpty()) {
-                mapItems.markers.take(5).forEach { marker ->
+                mapItems.markers.forEach { marker ->
                     Text(
                         text = "${marker.title}: ${marker.position.latitude}, ${marker.position.longitude}",
                         style = MaterialTheme.typography.bodySmall,
