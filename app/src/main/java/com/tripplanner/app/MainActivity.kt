@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -123,6 +125,7 @@ import com.tripplanner.app.model.TripObjectAttribute
 import com.tripplanner.app.model.TripObjectAttributeInputKind
 import com.tripplanner.app.model.TripObjectDraft
 import com.tripplanner.app.model.TripObjectType
+import com.tripplanner.app.model.TripEditorSnapshot
 import com.tripplanner.app.model.validTripDates
 import com.tripplanner.app.model.moveTripItem
 import com.tripplanner.app.model.removeTripItem
@@ -193,6 +196,7 @@ private enum class TripEditorPage {
     Items,
     Map,
     Bookings,
+    LibraryPicker,
     ItemEditor
 }
 
@@ -468,7 +472,6 @@ private fun TripPlannerApp(onStartupReady: () -> Unit = {}) {
                         appSkin = appSkin,
                         onAppSkinChange = { appSkin = it },
                         editingTripId = editingTripId,
-                        onTripSaved = { tripId -> editingTripId = tripId },
                         onBack = { returnToMainPage() }
                     )
                 }
@@ -568,6 +571,7 @@ private fun MainMenuScreen(
         onPlan = onManageTrips, onTravel = onUseExistingTrip, onOpenTrip = onOpenTrip, onEditTrip = onEditTrip,
         library = { GeneralLibrary(trips, repository) },
         account = {
+            SectionHeading("Settings")
             SectionHeading("Account", authSession.displayName)
             GoogleAccountLinkPanel(
                 authSession = authSession,
@@ -821,7 +825,7 @@ private fun DatabaseToolsPanel(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Database tools",
+                text = "Backup & restore",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -855,7 +859,7 @@ private fun DatabaseToolsPanel(
                 onClick = onExportWholeDb,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Export whole DB")
+                Text("Export backup")
             }
             OutlinedButton(
                 modifier = Modifier
@@ -864,13 +868,8 @@ private fun DatabaseToolsPanel(
                 onClick = onImportWholeDb,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Import whole DB")
+                Text("Import backup")
             }
-            Text(
-                text = "JSON backup files",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             status?.let { currentStatus ->
                 Text(
                     text = currentStatus,
@@ -1249,14 +1248,8 @@ private fun ItemPoolPanel(
     onUseItem: (PoolItemEntity) -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    ExpandableSection("Add from library (" + totalItemCount + ")") {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selectedTripPoolId == null, { onSelectTripPool(null) }, { Text("General") })
-            trips.forEach { trip ->
-                FilterChip(selectedTripPoolId == trip.id, { onSelectTripPool(trip.id) }, { Text(trip.title) })
-            }
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PoolPicker(trips, selectedTripPoolId, onSelectTripPool)
         SearchField(query, { query = it }, "Search library")
         TypeFilters(selectedTypeFilter, onSelectTypeFilter)
         val matching = poolItems.filter { it.name.contains(query, true) }
@@ -1878,9 +1871,13 @@ private fun PlanNewTripScreen(
     appSkin: AppSkin,
     onAppSkinChange: (AppSkin) -> Unit,
     editingTripId: Long?,
-    onTripSaved: (Long) -> Unit,
     onBack: () -> Unit
 ) {
+    var savedTripId by rememberSaveable(editingTripId) { mutableStateOf(editingTripId) }
+    var isSaving by remember { mutableStateOf(false) }
+    var showDiscardConfirmation by remember { mutableStateOf(false) }
+    var showItemDiscardConfirmation by remember { mutableStateOf(false) }
+    var lastSaved by remember(editingTripId) { mutableStateOf<TripEditorSnapshot?>(null) }
     var destination by rememberSaveable(editingTripId) { mutableStateOf("") }
     var startDate by rememberSaveable(editingTripId) { mutableStateOf("") }
     var endDate by rememberSaveable(editingTripId) { mutableStateOf("") }
@@ -1941,15 +1938,15 @@ private fun PlanNewTripScreen(
     }
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(editingTripId, tripRepository) {
-        if (editingTripId == null) {
+    LaunchedEffect(savedTripId, tripRepository) {
+        if (savedTripId == null) {
             isLoadingTrip = false
             return@LaunchedEffect
         }
 
         isLoadingTrip = true
         runCatching {
-            tripRepository.getEditableTrip(editingTripId)
+            tripRepository.getEditableTrip(savedTripId!!)
         }.onSuccess { editableTrip ->
             if (editableTrip == null) {
                 saveStatus = "Trip #$editingTripId was not found"
@@ -1959,6 +1956,7 @@ private fun PlanNewTripScreen(
                 endDate = editableTrip.trip.endDate
                 tripObjects.clear()
                 tripObjects.addAll(editableTrip.objects)
+                lastSaved = TripEditorSnapshot(destination, startDate, endDate, tripObjects.toList())
                 nextObjectId = -1L
                 priorityOrder = (
                     (editableTrip.objects.maxOfOrNull { it.priorityOrder } ?: 0) + 1
@@ -1991,6 +1989,7 @@ private fun PlanNewTripScreen(
     }
 
     fun editObject(tripObject: TripObjectDraft) {
+        saveStatus = null
         selectedObjectType = tripObject.type
         objectName = tripObject.name
         priorityOrder = tripObject.priorityOrder.toString()
@@ -2116,6 +2115,7 @@ private fun PlanNewTripScreen(
 
     fun openNewItemEditor() {
         resetObjectForm()
+        saveStatus = null
         editorPage = TripEditorPage.ItemEditor
     }
 
@@ -2124,15 +2124,67 @@ private fun PlanNewTripScreen(
         editorPage = TripEditorPage.Items
     }
 
-    fun navigateBack() {
-        when (editorPage) {
-            TripEditorPage.General -> onBack()
-            TripEditorPage.Items, TripEditorPage.Itinerary, TripEditorPage.Map, TripEditorPage.Bookings -> editorPage = TripEditorPage.General
-            TripEditorPage.ItemEditor -> closeItemEditor()
+    val snapshot = TripEditorSnapshot(destination, startDate, endDate, tripObjects.toList())
+    val hasChanges = lastSaved?.let { snapshot != it }
+        ?: (destination.isNotBlank() || startDate.isNotBlank() || endDate.isNotBlank() || tripObjects.isNotEmpty())
+
+    fun saveTrip(items: List<TripObjectDraft> = tripObjects.toList(), afterSave: () -> Unit = {}) {
+        if (isSaving) return
+        val pending = TripEditorSnapshot(destination, startDate, endDate, items)
+        if (!pending.canSave) return
+        val existingId = savedTripId
+        isSaving = true
+        saveStatus = null
+        coroutineScope.launch {
+            runCatching {
+                val result = if (existingId == null) {
+                    tripRepository.createTrip(pending.destination, pending.startDate, pending.endDate, pending.items)
+                } else {
+                    tripRepository.updateTrip(existingId, pending.destination, pending.startDate, pending.endDate, pending.items)
+                }
+                tripRepository.getEditableTrip(result.tripId) ?: error("Saved trip could not be loaded")
+            }.onSuccess { saved ->
+                savedTripId = saved.trip.id
+                tripObjects.clear(); tripObjects.addAll(saved.objects)
+                lastSaved = TripEditorSnapshot(pending.destination, pending.startDate, pending.endDate, saved.objects)
+                saveStatus = "Saved on this device"
+                if (existingId == null) editorPage = TripEditorPage.Items
+                afterSave()
+            }.onFailure { saveStatus = it.message ?: "Trip could not be saved" }
+            isSaving = false
         }
     }
 
-    BackHandler(enabled = editorPage != TripEditorPage.General) {
+    fun saveItem() {
+        val savedObject = TripObjectDraft(editingObjectId ?: nextObjectId--, selectedObjectType, objectName.trim(),
+            parsedPriorityOrder ?: nextAvailablePriority(),
+            selectedObjectType.attributes.associateWith { attributeValues[it].orEmpty().trim() }.filterValues { it.isNotBlank() },
+            relatedObjectIds.toSet())
+        val items = tripObjects.filterNot { it.id == savedObject.id } + savedObject
+        saveTrip(items) { resetObjectForm(); editorPage = TripEditorPage.Items }
+    }
+
+    fun navigateBack() {
+        if (isSaving) return
+        when (editorPage) {
+            TripEditorPage.General -> if (hasChanges) showDiscardConfirmation = true else onBack()
+            TripEditorPage.Items, TripEditorPage.Itinerary, TripEditorPage.Map, TripEditorPage.Bookings -> editorPage = TripEditorPage.General
+            TripEditorPage.LibraryPicker -> editorPage = TripEditorPage.Items
+            TripEditorPage.ItemEditor -> {
+                val original = tripObjects.firstOrNull { it.id == editingObjectId }
+                val changed = if (original == null) {
+                    objectName.isNotBlank() || attributeValues.values.any { it.isNotBlank() } || relatedObjectIds.isNotEmpty()
+                } else {
+                    original.name != objectName.trim() || original.type != selectedObjectType ||
+                        original.priorityOrder != parsedPriorityOrder || original.relatedObjectIds != relatedObjectIds.toSet() ||
+                        original.attributes != selectedObjectType.attributes.associateWith { attributeValues[it].orEmpty().trim() }.filterValues { it.isNotBlank() }
+                }
+                if (changed) showItemDiscardConfirmation = true else closeItemEditor()
+            }
+        }
+    }
+
+    BackHandler {
         navigateBack()
     }
 
@@ -2143,12 +2195,13 @@ private fun PlanNewTripScreen(
                     Text(
                         when (editorPage) {
                             TripEditorPage.General -> {
-                                if (editingTripId == null) "Add new trip" else "Edit existing trip"
+                                if (savedTripId == null) "New trip" else destination.ifBlank { "Edit trip" }
                             }
                             TripEditorPage.Items -> "Trip items"
                             TripEditorPage.Itinerary -> "Plan itinerary"
                             TripEditorPage.Map -> "Trip map"
                             TripEditorPage.Bookings -> "Bookings"
+                            TripEditorPage.LibraryPicker -> "Choose saved items"
                             TripEditorPage.ItemEditor -> {
                                 if (editingObjectId == null) {
                                     "Add trip item"
@@ -2156,7 +2209,7 @@ private fun PlanNewTripScreen(
                                     "Edit ${selectedObjectType.displayName}"
                                 }
                             }
-                        }
+                        }, maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                 },
                 navigationIcon = {
@@ -2172,6 +2225,33 @@ private fun PlanNewTripScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
+        },
+        bottomBar = {
+            if (editorPage != TripEditorPage.LibraryPicker) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 18.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        saveStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        if (editorPage == TripEditorPage.ItemEditor) priorityError?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        if (hasChanges && savedTripId != null && editorPage != TripEditorPage.ItemEditor) {
+                            Text("Unsaved changes", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                        if (savedTripId == null || hasChanges || editorPage == TripEditorPage.ItemEditor) {
+                        Button(onClick = { if (editorPage == TripEditorPage.ItemEditor) saveItem() else saveTrip() },
+                            enabled = snapshot.canSave && !isLoadingTrip && !isSaving &&
+                                (if (editorPage == TripEditorPage.ItemEditor) canSaveObject else savedTripId == null || hasChanges),
+                            modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(8.dp)) {
+                            androidx.compose.material3.Icon(Icons.Outlined.Save, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(when { isSaving -> "Saving..."; editorPage == TripEditorPage.ItemEditor -> "Save item";
+                                savedTripId == null -> "Create trip"; else -> "Save trip" })
+                        }
+                        }
+                    }
+                }
+            }
         }
     ) { innerPadding ->
         Column(
@@ -2182,39 +2262,23 @@ private fun PlanNewTripScreen(
                 .padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (editorPage != TripEditorPage.ItemEditor) {
-                WorkspaceTabs(listOf("Overview", "Itinerary", "Items", "Map", "Bookings"),
-                    if (editorPage == TripEditorPage.General) "Overview" else editorPage.name) {
-                    editorPage = if (it == "Overview") TripEditorPage.General else TripEditorPage.valueOf(it)
+            if (savedTripId != null && editorPage != TripEditorPage.ItemEditor && editorPage != TripEditorPage.LibraryPicker) {
+                WorkspaceTabs(listOf("Trip", "Items", "Itinerary", "Map"),
+                    if (editorPage == TripEditorPage.General) "Trip" else editorPage.name) {
+                    if (!isSaving) editorPage = if (it == "Trip") TripEditorPage.General else TripEditorPage.valueOf(it)
                 }
             }
             if (editorPage == TripEditorPage.Itinerary) {
                 DayAgenda(tripObjects, startDate, endDate, ::editObject)
             }
             if (editorPage == TripEditorPage.General) {
-                SectionHeading(destination.ifBlank { "New trip" },
-                    tripObjects.size.toString() + " items / " + tripObjects.count { it.type == TripObjectType.FAMILY_MEMBER } + " travellers")
-                Text(
-                    text = "Trip basics",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
+                if (savedTripId != null) SectionHeading("Trip details", readableDates(startDate, endDate))
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = destination,
-                            onValueChange = { destination = it },
+                            onValueChange = { destination = it; saveStatus = null },
+                            enabled = !isSaving,
                             label = { Text("Destination") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(
@@ -2224,41 +2288,23 @@ private fun PlanNewTripScreen(
                         TripDatePickerField(
                             label = "Start date",
                             value = startDate,
-                            onValueChange = { startDate = it }
+                            onValueChange = { startDate = it; saveStatus = null }
                         )
                         TripDatePickerField(
                             label = "End date",
                             value = endDate,
-                            onValueChange = { endDate = it }
+                            onValueChange = { endDate = it; saveStatus = null }
                         )
-                    }
                 }
-                if (!validTripDates(startDate, endDate)) {
+                if ((startDate.isNotBlank() || endDate.isNotBlank()) && !validTripDates(startDate, endDate)) {
                     Text("Choose both dates, with the end on or after the start.", color = MaterialTheme.colorScheme.error)
                 }
-                HomeActionCard(
-                    title = "Trip items",
-                    subtitle = "Open the item pool and manage ${tripObjects.size} itinerary items",
-                    accent = MaterialTheme.colorScheme.primary,
-                    onClick = { editorPage = TripEditorPage.Items }
-                )
-            }
-            if (editorPage == TripEditorPage.Items) {
-                SectionHeading("Trip items", tripObjects.size.toString() + " items")
-                Button(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    onClick = ::openNewItemEditor,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("+ New item")
+                if (savedTripId != null) ExpandableSection("Bookings & transportation") {
+                    BookingsPanel(tripObjects)
+                    TransportationBoardPanel(tripObjects)
                 }
-                Text(
-                    text = "Reuse saved items",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+            }
+            if (editorPage == TripEditorPage.LibraryPicker) {
                 val tripObjectIds = tripObjects.map { it.id }.toSet()
                 val selectedPoolItems = if (selectedPoolTripId == null) {
                     generalPoolItems
@@ -2291,15 +2337,31 @@ private fun PlanNewTripScreen(
                                         .toSet()
                                 )
                             )
-                            saveStatus = "${poolItem.name} linked to this trip"
+                            saveTrip() { editorPage = TripEditorPage.Items }
                         }
                     }
                 )
-                Text(
-                    text = "Items in this trip",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+            }
+            if (editorPage == TripEditorPage.Items) {
+                SectionHeading("Trip items", tripObjects.size.toString() + if (tripObjects.size == 1) " item" else " items")
+                Button(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    onClick = ::openNewItemEditor,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    androidx.compose.material3.Icon(Icons.Outlined.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("New item")
+                }
+                OutlinedButton(onClick = { editorPage = TripEditorPage.LibraryPicker },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                    androidx.compose.material3.Icon(Icons.Outlined.Bookmarks, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add saved item")
+                }
+
                 if (tripObjects.isEmpty()) {
                     EmptyTripsCard(text = "No trip items yet")
                 } else {
@@ -2311,50 +2373,27 @@ private fun PlanNewTripScreen(
                                     canUp = tripObject.id != tripObjects.minByOrNull { it.priorityOrder }?.id,
                                     canDown = tripObject.id != tripObjects.maxByOrNull { it.priorityOrder }?.id,
                                     onUp = {
+                                        saveStatus = null
                                         val moved = moveTripItem(tripObjects.toList(), tripObject.id, -1)
                                         tripObjects.clear(); tripObjects.addAll(moved)
                                     },
                                     onDown = {
+                                        saveStatus = null
                                         val moved = moveTripItem(tripObjects.toList(), tripObject.id, 1)
                                         tripObjects.clear(); tripObjects.addAll(moved)
                                     },
                                     onRemove = {
+                                        saveStatus = null
                                         val remaining = removeTripItem(tripObjects.toList(), tripObject.id)
                                         tripObjects.clear(); tripObjects.addAll(remaining)
                                     })
                             }
                     }
                 }
-                saveStatus?.let { status ->
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+
             }
             if (editorPage == TripEditorPage.ItemEditor) {
-                Text(
-                    text = if (editingObjectId == null) {
-                        "Create an item"
-                    } else {
-                        "Edit ${selectedObjectType.displayName}"
-                    },
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     ItemTypePicker(selectedObjectType) { type ->
                         if (type != selectedObjectType) {
                             selectedObjectType = type
@@ -2373,21 +2412,8 @@ private fun PlanNewTripScreen(
                             capitalization = KeyboardCapitalization.Words
                         )
                     )
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = priorityOrder,
-                        onValueChange = { priorityOrder = it.filter(Char::isDigit) },
-                        label = { Text("Priority / order") },
-                        singleLine = true,
-                        isError = priorityError != null,
-                        supportingText = priorityError?.let { error ->
-                            { Text(error) }
-                        },
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number
-                        )
-                    )
                     if (selectedObjectType.supportsGooglePlaceDetails()) {
+                        ExpandableSection("Find on Google Maps") {
                         GooglePlaceSearchPanel(
                             query = googlePlaceSearchQuery,
                             onQueryChange = { googlePlaceSearchQuery = it },
@@ -2398,6 +2424,7 @@ private fun PlanNewTripScreen(
                             onSearch = ::searchGooglePlaces,
                             onSelectResult = ::selectGooglePlaceSearchResult
                         )
+                        }
                     }
                     AttributeSections(selectedObjectType, { attributeValues[it].orEmpty() },
                         { attribute, value -> attributeValues[attribute] = value })
@@ -2425,33 +2452,28 @@ private fun PlanNewTripScreen(
                             )
                         }
                     }
-                    if (selectedObjectType.supportsGooglePlaceDetails()) {
-                        OutlinedButton(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            onClick = {
-                                fetchGoogleDetails(placeId = googlePlaceId)
-                            },
-                            enabled = canFetchGoogleDetails,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                if (isFetchingGoogleDetails) {
-                                    "Fetching Google details"
-                                } else {
-                                    "Fetch Google details"
-                                }
-                            )
-                        }
-                        googleFetchStatus?.let { status ->
-                            Text(
-                                text = status,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    ExpandableSection("Order & advanced settings") {
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = priorityOrder,
+                        onValueChange = { priorityOrder = it.filter(Char::isDigit) },
+                        label = { Text("Priority / order") },
+                        singleLine = true,
+                        isError = priorityError != null,
+                        supportingText = priorityError?.let { error ->
+                            { Text(error) }
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number
+                        )
+                    )
+                        if (selectedObjectType.supportsGooglePlaceDetails()) {
+                            OutlinedButton(onClick = { fetchGoogleDetails(googlePlaceId) }, enabled = canFetchGoogleDetails) {
+                                Text("Refresh Google details")
+                            }
                         }
                     }
+                    googleFetchStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     val relatedObjectCandidates = tripObjects
                         .filter { it.id != editingObjectId }
                         .sortedBy { it.priorityOrder }
@@ -2505,51 +2527,7 @@ private fun PlanNewTripScreen(
                             }
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp),
-                            onClick = {
-                                val objectId = editingObjectId ?: nextObjectId--
-                                val savedObject = TripObjectDraft(
-                                    id = objectId,
-                                    type = selectedObjectType,
-                                    name = objectName.trim(),
-                                    priorityOrder = parsedPriorityOrder ?: nextAvailablePriority(),
-                                    attributes = selectedObjectType.attributes
-                                        .associateWith { attributeValues[it].orEmpty().trim() }
-                                        .filterValues { it.isNotBlank() },
-                                    relatedObjectIds = relatedObjectIds.toSet()
-                                )
 
-                                upsertTripObject(
-                                    tripObjects = tripObjects,
-                                    savedObject = savedObject
-                                )
-                                saveStatus = "${savedObject.name} saved"
-                                resetObjectForm()
-                                editorPage = TripEditorPage.Items
-                            },
-                            enabled = canSaveObject,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(if (editingObjectId == null) "Add object" else "Save object")
-                        }
-                        OutlinedButton(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp),
-                            onClick = ::closeItemEditor,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Cancel")
-                        }
-                    }
-                    }
                 }
             }
             if (editorPage == TripEditorPage.Map) {
@@ -2560,7 +2538,7 @@ private fun PlanNewTripScreen(
                 )
                 PrivateMapPresetPanel(
                     tripObjects = tripObjects,
-                    isSavedTrip = editingTripId != null,
+                    isSavedTrip = savedTripId != null,
                     onOpenGoogleMaps = {
                         val mapIntent = GoogleMapsIntents.openMapIntent(tripObjects)
                         if (mapIntent == null) {
@@ -2579,72 +2557,7 @@ private fun PlanNewTripScreen(
                 BookingsPanel(tripObjects)
                 TransportationBoardPanel(tripObjects)
             }
-            if (editorPage != TripEditorPage.ItemEditor) {
-                Button(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    onClick = {
-                        coroutineScope.launch {
-                            runCatching {
-                                if (editingTripId == null) {
-                                    tripRepository.createTrip(
-                                        destination = destination,
-                                        startDate = startDate,
-                                        endDate = endDate,
-                                        objects = tripObjects
-                                    )
-                                } else {
-                                    tripRepository.updateTrip(
-                                        tripId = editingTripId,
-                                        destination = destination,
-                                        startDate = startDate,
-                                        endDate = endDate,
-                                        objects = tripObjects
-                                    )
-                                }
-                            }.onSuccess { result ->
-                                onTripSaved(result.tripId)
-                                tripRepository.getEditableTrip(result.tripId)?.let { editableTrip ->
-                                    destination = editableTrip.trip.destination
-                                    startDate = editableTrip.trip.startDate
-                                    endDate = editableTrip.trip.endDate
-                                    tripObjects.clear()
-                                    tripObjects.addAll(editableTrip.objects)
-                                    nextObjectId = -1L
-                                    priorityOrder = nextAvailablePriority().toString()
-                                    resetObjectForm()
-                                }
-                                saveStatus = buildString {
-                                    append(
-                                        if (editingTripId == null) {
-                                            "Trip saved locally #${result.tripId}"
-                                        } else {
-                                            "Trip updated locally #${result.tripId}"
-                                        }
-                                    )
-                                    result.privateMapPresetId?.let { presetId ->
-                                        append(". Private map preset #$presetId")
-                                    }
-                                }
-                            }.onFailure { error ->
-                                saveStatus = error.message ?: "Trip could not be saved"
-                            }
-                        }
-                    },
-                    enabled = destination.isNotBlank() && !isLoadingTrip && validTripDates(startDate, endDate),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(if (editingTripId == null) "Create trip" else "Save trip")
-                }
-                saveStatus?.let { status ->
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+
         }
     }
 
@@ -2653,6 +2566,22 @@ private fun PlanNewTripScreen(
             selectedPoolTripId = null
         }
     }
+    if (showDiscardConfirmation) AlertDialog(
+        onDismissRequest = { showDiscardConfirmation = false },
+        title = { Text("Unsaved changes") },
+        confirmButton = { TextButton(onClick = { showDiscardConfirmation = false; onBack() }) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = { showDiscardConfirmation = false }) { Text("Keep editing") } }
+    )
+    if (showItemDiscardConfirmation) AlertDialog(
+        onDismissRequest = { showItemDiscardConfirmation = false },
+        title = { Text("Discard item edits?") },
+        confirmButton = { TextButton(onClick = { showItemDiscardConfirmation = false; closeItemEditor() }) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = { showItemDiscardConfirmation = false }) { Text("Keep editing") } }
+    )
+    if (isSaving) AlertDialog(onDismissRequest = {},
+        title = { Text("Saving...") },
+        text = { androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth()) },
+        confirmButton = {})
 }
 
 private fun tripDateSubtitle(
@@ -2711,7 +2640,7 @@ private fun TripDatePickerField(
                         MaterialTheme.colorScheme.onSurface
                     }
                 )
-                androidx.compose.material3.Icon(Icons.Outlined.CalendarMonth, "Choose date",
+                androidx.compose.material3.Icon(Icons.Outlined.CalendarMonth, "Choose " + label.lowercase(),
                     tint = MaterialTheme.colorScheme.primary)
             }
         }
@@ -3950,7 +3879,6 @@ private fun PlanNewTripPreview() {
             appSkin = AppSkin.System,
             onAppSkinChange = {},
             editingTripId = null,
-            onTripSaved = {},
             onBack = {}
         )
     }

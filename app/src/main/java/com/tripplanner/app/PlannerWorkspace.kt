@@ -26,6 +26,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.tripplanner.app.data.TripRepository
 import com.tripplanner.app.data.local.entity.TripEntity
 import com.tripplanner.app.data.local.entity.PoolItemEntity
@@ -91,7 +93,7 @@ internal fun EmptyState(title: String, subtitle: String, icon: ImageVector = Ico
     }
 }
 
-private enum class HubTab { Home, Library, Account }
+private enum class HubTab(val label: String) { Home("Home"), Library("Saved items"), Account("Settings") }
 
 @Composable
 internal fun PlannerHub(
@@ -110,28 +112,17 @@ internal fun PlannerHub(
                             HubTab.Home -> Icons.Outlined.Home
                             HubTab.Library -> Icons.Outlined.Bookmarks
                             HubTab.Account -> Icons.Outlined.PersonOutline
-                        }, null) }, label = { Text(destination.name) })
+                        }, null) }, label = { Text(destination.label) })
                 }
             }
         }) { padding ->
         when (tab) {
             HubTab.Home -> LazyColumn(Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item { SectionHeading("Your journeys", trips.size.toString() + " saved trips") }
-                item { HubAction("Add new / edit trip", "Plan your next journey", Icons.Outlined.EditCalendar, onPlan) }
-                item { HubAction("Use existing trip", "Open your itinerary", Icons.Outlined.Explore, onTravel) }
+                item { SectionHeading("My trips", trips.size.toString() + " saved trips") }
+                item { HubAction("Plan a trip", "New or existing trip", Icons.Outlined.EditCalendar, onPlan) }
                 item { HorizontalDivider() }
-                item { SectionHeading("Recent trips", action = { TextButton(onClick = onPlan) { Text("View all") } }) }
-                if (trips.isEmpty()) item {
-                    Image(painterResource(R.drawable.travel_cover), null, Modifier.fillMaxWidth().height(128.dp),
-                        contentScale = ContentScale.Crop)
-                    EmptyState("A new journey awaits", "Your saved trips will appear here.")
-                }
-                items(trips.take(4), key = { it.id }) { trip ->
-                    TripEntry(trip, onClick = { onOpenTrip(trip.id) }, actions = {
-                        ActionIcon("Edit trip", Icons.Outlined.Edit) { onEditTrip(trip.id) }
-                    })
-                }
+                item { HubAction("Use a trip", "Itinerary, bookings & map", Icons.Outlined.Explore, onTravel) }
             }
             HubTab.Library -> Box(Modifier.fillMaxSize().padding(padding)) { library() }
             HubTab.Account -> Column(Modifier.fillMaxSize().padding(padding)
@@ -199,15 +190,23 @@ internal fun TripBrowser(trips: List<TripEntity>, archived: List<TripEntity>, he
                 Spacer(Modifier.weight(1f))
                 ActionIcon("Import trip", Icons.Outlined.FileDownload, onClick = onImport)
             } }
-            item { SearchField(query, { query = it }, "Search trips") }
+            if (source.isNotEmpty()) item { SearchField(query, { query = it }, "Search trips") }
             status?.let { item { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium) } }
             if (visible.isEmpty()) item { EmptyState(if (query.isBlank()) "No trips here yet" else "No matching trips",
                 if (showArchive) "Archived trips will appear here." else "Create a trip or import a saved plan.") }
             items(visible, key = { it.id }) { trip ->
                 TripEntry(trip, { onEdit(trip.id) }) {
-                    ActionIcon("Export " + trip.title, Icons.Outlined.FileUpload) { onExport(trip.id) }
-                    ActionIcon(if (showArchive) "Restore " + trip.title else "Archive " + trip.title,
-                        if (showArchive) Icons.Outlined.Unarchive else Icons.Outlined.Archive) { onArchive(trip) }
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        ActionIcon("More actions for " + trip.title, Icons.Outlined.MoreVert) { menu = true }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem(text = { Text("Export trip") }, leadingIcon = { Icon(Icons.Outlined.FileUpload, null) },
+                                onClick = { menu = false; onExport(trip.id) })
+                            DropdownMenuItem(text = { Text(if (showArchive) "Restore trip" else "Archive trip") },
+                                leadingIcon = { Icon(if (showArchive) Icons.Outlined.Unarchive else Icons.Outlined.Archive, null) },
+                                onClick = { menu = false; onArchive(trip) })
+                        }
+                    }
                 }
             }
         }
@@ -287,6 +286,23 @@ internal fun TypeFilters(selected: TripObjectType?, onSelect: (TripObjectType?) 
 }
 
 @Composable
+internal fun PoolPicker(trips: List<TripEntity>, selected: Long?, onSelect: (Long?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+            Icon(Icons.Outlined.FolderOpen, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(trips.firstOrNull { it.id == selected }?.title ?: "General - all saved items", Modifier.weight(1f), maxLines = 2)
+            Icon(Icons.Outlined.ExpandMore, "Choose item pool")
+        }
+        DropdownMenu(expanded, { expanded = false }) {
+            DropdownMenuItem(text = { Text("General - all saved items") }, onClick = { onSelect(null); expanded = false })
+            trips.forEach { trip -> DropdownMenuItem(text = { Text(trip.title) }, onClick = { onSelect(trip.id); expanded = false }) }
+        }
+    }
+}
+
+@Composable
 internal fun GeneralLibrary(trips: List<TripEntity>, repository: TripRepository) {
     val context = LocalContext.current
     val database = (context.applicationContext as TripPlannerApplication).database
@@ -294,6 +310,8 @@ internal fun GeneralLibrary(trips: List<TripEntity>, repository: TripRepository)
     var filter by rememberSaveable { mutableStateOf<TripObjectType?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var editor by remember { mutableStateOf<TripObjectDraft?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
+    var showDiscard by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val allGeneral by database.poolItemDao().observeGeneralPoolItems().collectAsState(emptyList())
@@ -301,35 +319,45 @@ internal fun GeneralLibrary(trips: List<TripEntity>, repository: TripRepository)
         poolTripId?.let { database.poolItemDao().observeTripPoolItems(it) }
             ?: database.poolItemDao().observeGeneralPoolItems()
     }.collectAsState(emptyList())
-    BackHandler(editor != null) { editor = null }
+    BackHandler(editor != null) { if (!isSaving) showDiscard = true }
     if (editor != null) {
-        LibraryEditor(editor!!, candidates = allGeneral, onCancel = { editor = null }, onSave = { draft ->
+        Dialog(onDismissRequest = { if (!isSaving) showDiscard = true }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = MaterialTheme.colorScheme.background) {
+        LibraryEditor(editor!!, candidates = allGeneral, onCancel = { showDiscard = true }, onSave = { draft ->
+            isSaving = true
+            status = null
             scope.launch {
                 runCatching { repository.saveGeneralItem(draft) }.onSuccess {
                     editor = null; status = draft.name + " saved to General"
                 }.onFailure { status = it.message }
+                isSaving = false
             }
-        }, status = status)
+        }, status = status, isSaving = isSaving)
+        if (showDiscard) AlertDialog(onDismissRequest = { showDiscard = false },
+            title = { Text("Discard item edits?") },
+            confirmButton = { TextButton(onClick = { showDiscard = false; editor = null }) { Text("Discard") } },
+            dismissButton = { TextButton(onClick = { showDiscard = false }) { Text("Keep editing") } })
+        }
+        }
         return
     }
     val visible = pool.filter { (filter == null || it.type == filter) && it.name.contains(query, true) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { SectionHeading("Item library", pool.size.toString() + " reusable items", action = {
-            ActionIcon("New library item", Icons.Outlined.Add) {
+        item { SectionHeading("Saved items", pool.size.toString() + " items") }
+        item { Button(onClick = {
                 status = null; editor = TripObjectDraft(-1, TripObjectType.FREE_ATTRACTION, "", 0, emptyMap(), emptySet())
-            }
-        }) }
-        item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(poolTripId == null, { poolTripId = null }, { Text("General") })
-            trips.forEach { trip -> FilterChip(poolTripId == trip.id, { poolTripId = trip.id }, { Text(trip.title) }) }
-        } }
+            }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("New item")
+            } }
+        item { PoolPicker(trips, poolTripId) { poolTripId = it } }
         item { SearchField(query, { query = it }, "Search saved items") }
         item { TypeFilters(filter) { filter = it } }
         status?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
         if (visible.isEmpty()) item { EmptyState("No items found", "Add an item or choose another pool.", Icons.Outlined.Bookmarks) }
         items(visible, key = { it.id }) { entry ->
             Row(Modifier.fillMaxWidth().clickable { scope.launch {
-                editor = repository.getPoolItemDraft(entry.id); status = null
+                    runCatching { repository.getPoolItemDraft(entry.id) }
+                        .onSuccess { editor = it; status = null }.onFailure { status = it.message }
             } }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ItemSymbol(entry.type)
@@ -345,7 +373,8 @@ internal fun GeneralLibrary(trips: List<TripEntity>, repository: TripRepository)
 }
 
 @Composable
-private fun LibraryEditor(draft: TripObjectDraft, candidates: List<PoolItemEntity>, onCancel: () -> Unit, onSave: (TripObjectDraft) -> Unit, status: String?) {
+private fun LibraryEditor(draft: TripObjectDraft, candidates: List<PoolItemEntity>, onCancel: () -> Unit,
+    onSave: (TripObjectDraft) -> Unit, status: String?, isSaving: Boolean) {
     var name by remember(draft.id) { mutableStateOf(draft.name) }
     var type by remember(draft.id) { mutableStateOf(draft.type) }
     var priority by remember(draft.id) { mutableStateOf(draft.priorityOrder.takeIf { it > 0 }?.toString().orEmpty()) }
@@ -353,34 +382,48 @@ private fun LibraryEditor(draft: TripObjectDraft, candidates: List<PoolItemEntit
     var linkedSearch by remember { mutableStateOf("") }
     val invalidPriority = priority.isNotBlank() && (priority.toIntOrNull() ?: 0) < 1
     val attributes = remember(draft.id) { mutableStateMapOf<TripObjectAttribute, String>().apply { putAll(draft.attributes) } }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ActionIcon("Back to library", Icons.AutoMirrored.Outlined.ArrowBack, onClick = onCancel)
-            Text(if (draft.id > 0) "Edit library item" else "New library item", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-        Text("General pool", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        if (draft.id <= 0) ItemTypePicker(type) { type = it }
-        OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") })
-        OutlinedTextField(priority, { priority = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(),
-            label = { Text("Priority / order") }, placeholder = { Text("Automatic") },
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-        AttributeSections(type, { attributes[it].orEmpty() }, { key, value -> attributes[key] = value }, includeNotes = true)
-        ExpandableSection("Linked items (" + related.size + ")") {
-            SearchField(linkedSearch, { linkedSearch = it }, "Search linked items")
-            candidates.filter { it.id != draft.id && it.name.contains(linkedSearch, true) }.forEach { candidate ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(candidate.id in related, { checked ->
-                        related = if (checked) related + candidate.id else related - candidate.id
-                    })
-                    Text(candidate.name, Modifier.weight(1f))
+    Scaffold(bottomBar = {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                Button(onClick = { onSave(draft.copy(type = type, name = name,
+                    priorityOrder = priority.toIntOrNull() ?: 0, relatedObjectIds = related,
+                    attributes = type.attributes.associateWith { attributes[it].orEmpty().trim() }.filterValues { it.isNotBlank() })) },
+                    enabled = name.isNotBlank() && !invalidPriority && !isSaving,
+                    modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(8.dp)) {
+                    Icon(Icons.Outlined.Save, null); Spacer(Modifier.width(8.dp))
+                    Text(if (isSaving) "Saving..." else "Save item")
                 }
             }
         }
-        status?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(onClick = { onSave(draft.copy(type = type, name = name, priorityOrder = priority.toIntOrNull() ?: 0, relatedObjectIds = related,
-            attributes = type.attributes.associateWith { attributes[it].orEmpty().trim() }.filterValues { it.isNotBlank() })) },
-            enabled = name.isNotBlank() && !invalidPriority, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
-            Icon(Icons.Outlined.Save, null); Spacer(Modifier.width(8.dp)); Text("Save item")
+    }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ActionIcon("Back to saved items", Icons.AutoMirrored.Outlined.ArrowBack, !isSaving, onCancel)
+                Text(if (draft.id > 0) "Edit item" else "New item", Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            if (draft.id <= 0) ItemTypePicker(type) { type = it }
+            OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, enabled = !isSaving)
+            AttributeSections(type, { attributes[it].orEmpty() }, { key, value -> attributes[key] = value }, includeNotes = true)
+            ExpandableSection("Order") {
+                OutlinedTextField(priority, { priority = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(),
+                    label = { Text("Priority / order") }, placeholder = { Text("Automatic") }, isError = invalidPriority,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+            }
+            ExpandableSection("Linked items (" + related.size + ")") {
+                SearchField(linkedSearch, { linkedSearch = it }, "Search linked items")
+                candidates.filter { it.id != draft.id && it.name.contains(linkedSearch, true) }.forEach { candidate ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(candidate.id in related, { checked ->
+                            related = if (checked) related + candidate.id else related - candidate.id
+                        })
+                        Text(candidate.name, Modifier.weight(1f))
+                    }
+                }
+            }
         }
     }
 }
@@ -397,10 +440,15 @@ internal fun AttributeSections(type: TripObjectType, value: (TripObjectAttribute
         TripObjectAttribute.PHONE_NUMBER, TripObjectAttribute.TICKET_URL, TripObjectAttribute.CHECK_IN_URL,
         TripObjectAttribute.SCHEDULE_URL, TripObjectAttribute.LIVE_STATUS_URL)
     val fields = type.attributes.filterNot { it == TripObjectAttribute.NOTES }
-    val groups = listOf("Details" to fields.filterNot { it in advanced || it in contact },
+    val essential = setOf(TripObjectAttribute.ADDRESS, TripObjectAttribute.CHECK_IN, TripObjectAttribute.CHECK_OUT,
+        TripObjectAttribute.PLANNED_VISIT_DATE_TIME, TripObjectAttribute.AGE, TripObjectAttribute.RELATION,
+        TripObjectAttribute.TRANSPORTATION_MODE, TripObjectAttribute.DEPARTURE_LOCATION,
+        TripObjectAttribute.DEPARTURE_DATE_TIME, TripObjectAttribute.ARRIVAL_LOCATION, TripObjectAttribute.ARRIVAL_DATE_TIME)
+    fields.filter { it in essential }.forEach { field -> TripAttributeInput(field, value(field)) { onChange(field, it) } }
+    val groups = listOf("More details" to fields.filterNot { it in essential || it in advanced || it in contact },
         "Contact & links" to fields.filter { it in contact }, "Photos & map details" to fields.filter { it in advanced })
     groups.filter { it.second.isNotEmpty() }.forEach { (title, entries) ->
-        ExpandableSection(title, initiallyExpanded = title == "Details") {
+        ExpandableSection(title) {
             entries.forEach { field -> TripAttributeInput(field, value(field)) { onChange(field, it) } }
         }
     }
@@ -468,6 +516,7 @@ internal fun DayAgenda(items: List<TripObjectDraft>, start: String, end: String,
 internal fun EditableTripRow(item: TripObjectDraft, onEdit: () -> Unit, onUp: () -> Unit, onDown: () -> Unit,
     canUp: Boolean, canDown: Boolean, onRemove: () -> Unit) {
     var confirmRemoval by rememberSaveable(item.id) { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -476,12 +525,15 @@ internal fun EditableTripRow(item: TripObjectDraft, onEdit: () -> Unit, onUp: ()
                 Text("#" + item.priorityOrder + "  " + item.name, fontWeight = FontWeight.SemiBold)
                 Text(item.type.displayName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            ActionIcon("Edit " + item.name, Icons.Outlined.Edit, onClick = onEdit)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            ActionIcon("Move " + item.name + " up", Icons.Outlined.ArrowUpward, canUp, onUp)
-            ActionIcon("Move " + item.name + " down", Icons.Outlined.ArrowDownward, canDown, onDown)
-            ActionIcon("Remove " + item.name + " from trip", Icons.Outlined.LinkOff) { confirmRemoval = true }
+            Box {
+                ActionIcon("More actions for " + item.name, Icons.Outlined.MoreVert) { menu = true }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("Edit item") }, onClick = { menu = false; onEdit() })
+                    DropdownMenuItem(text = { Text("Move up") }, enabled = canUp, onClick = { menu = false; onUp() })
+                    DropdownMenuItem(text = { Text("Move down") }, enabled = canDown, onClick = { menu = false; onDown() })
+                    DropdownMenuItem(text = { Text("Remove from trip") }, onClick = { menu = false; confirmRemoval = true })
+                }
+            }
         }
         HorizontalDivider()
     }
